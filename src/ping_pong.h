@@ -117,6 +117,9 @@ typedef struct ping_pong_notify {
     } payload;
 } ping_pong_notify_t;
 
+/* 不透明结构体声明 */
+typedef struct ping_pong ping_pong_t;
+
 /* 端口（PingPong 对外部的唯一依赖） */
 typedef struct {
     /* 获取当前时间戳（毫秒），必须实现 */
@@ -125,9 +128,6 @@ typedef struct {
     /* 通知回调，由上层实现 */
     void (*notify)(struct ping_pong *pp, const ping_pong_notify_t *notify);
 } ping_pong_port_t;
-
-/* 不透明结构体声明 */
-typedef struct ping_pong ping_pong_t;
 
 /* ==================== API 函数 ==================== */
 
