@@ -62,6 +62,7 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms);
 static void handle_master_fail(ping_pong_t *pp, uint32_t reason);
 static void handle_master_retry(ping_pong_t *pp);
 static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq);
+static void handle_slave_rx_request(ping_pong_t *pp, uint32_t timestamp_ms);
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type);
 
 /* ==================== 内部函数实现 ==================== */
@@ -163,7 +164,6 @@ static void handle_master_retry(ping_pong_t *pp)
 static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq)
 {
     pp->stats.slave_rx_count++;
-    pp->current_seq = seq;
     update_stats(pp);
 
     /* 通知装配层收到了 Ping */
@@ -186,6 +186,18 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq)
     notify.seq = pp->current_seq;
     notify.payload.tx_request.tx_buffer = pp->tx_buffer;
     notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
+    send_notify(pp, &notify);
+}
+
+static void handle_slave_rx_request(ping_pong_t *pp, uint32_t timestamp_ms)
+{
+    ping_pong_notify_t notify;
+
+    pp->state = PING_PONG_STATE_RX_WAIT;
+    pp->rx_start_time = timestamp_ms;
+    notify.type = PING_PONG_NOTIFY_RX_REQUEST;
+    notify.timestamp_ms = timestamp_ms;
+    notify.seq = pp->current_seq;
     send_notify(pp, &notify);
 }
 
@@ -244,6 +256,8 @@ int ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *config)
 
 int ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
 {
+    ping_pong_role_t previous_role;
+
     if (!pp || pp->magic != PING_PONG_MAGIC) {
         return -1;
     }
@@ -259,9 +273,13 @@ int ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
     if (role != PING_PONG_ROLE_MASTER && role != PING_PONG_ROLE_SLAVE) {
         return -1;
     }
-    
+
+    previous_role = pp->role;
+    if (role == PING_PONG_ROLE_MASTER && previous_role == PING_PONG_ROLE_MASTER) {
+        pp->current_seq++;
+    }
+
     pp->role = role;
-    pp->current_seq++;
     pp->current_retry = 0;
     
     if (role == PING_PONG_ROLE_MASTER) {
@@ -276,14 +294,7 @@ int ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
         notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
         send_notify(pp, &notify);
     } else {
-        pp->state = PING_PONG_STATE_RX_WAIT;
-        pp->rx_start_time = pp->port.get_time_ms();
-        
-        ping_pong_notify_t notify;
-        notify.type = PING_PONG_NOTIFY_RX_REQUEST;
-        notify.timestamp_ms = pp->rx_start_time;
-        notify.seq = 0;
-        send_notify(pp, &notify);
+        handle_slave_rx_request(pp, pp->port.get_time_ms());
     }
     
     ping_pong_notify_t started;
@@ -374,7 +385,7 @@ int ping_pong_process(ping_pong_t *pp)
             notify.timestamp_ms = now_ms;
             notify.seq = pp->current_seq;
             send_notify(pp, &notify);
-            pp->state = PING_PONG_STATE_IDLE;
+            handle_slave_rx_request(pp, now_ms);
         }
     }
     
@@ -391,14 +402,10 @@ int ping_pong_on_tx_done(ping_pong_t *pp)
         return -1;
     }
     
-    pp->rx_start_time = pp->port.get_time_ms();
-    pp->state = PING_PONG_STATE_RX_WAIT;
-    
-    ping_pong_notify_t notify;
-    notify.type = PING_PONG_NOTIFY_RX_REQUEST;
-    notify.timestamp_ms = pp->rx_start_time;
-    notify.seq = pp->current_seq;
-    send_notify(pp, &notify);
+    if (pp->role == PING_PONG_ROLE_SLAVE) {
+        pp->current_seq++;
+    }
+    handle_slave_rx_request(pp, pp->port.get_time_ms());
     
     return 0;
 }
@@ -437,7 +444,9 @@ int ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len, int
         }
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
         if (header->type == PACKET_TYPE_PING) {
-            handle_slave_ping_received(pp, seq);
+            if (seq == (uint8_t)(pp->current_seq & 0xFF)) {
+                handle_slave_ping_received(pp, seq);
+            }
         } else if (header->type == PACKET_TYPE_PONG) {
             handle_conflict(pp, PING_PONG_CONFLICT_SLAVE_RX_PONG);
         }
