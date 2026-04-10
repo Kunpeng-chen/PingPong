@@ -163,6 +163,7 @@ static void handle_master_retry(ping_pong_t *pp)
 
 static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq)
 {
+    pp->current_seq = seq;
     pp->stats.slave_rx_count++;
     update_stats(pp);
 
@@ -403,8 +404,10 @@ int ping_pong_on_tx_done(ping_pong_t *pp)
     }
     
     if (pp->role == PING_PONG_ROLE_SLAVE) {
-        pp->current_seq++;
+        handle_slave_rx_request(pp, pp->port.get_time_ms());
+        return 0;
     }
+    
     handle_slave_rx_request(pp, pp->port.get_time_ms());
     
     return 0;
@@ -444,9 +447,7 @@ int ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len, int
         }
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
         if (header->type == PACKET_TYPE_PING) {
-            if (seq == (uint8_t)(pp->current_seq & 0xFF)) {
-                handle_slave_ping_received(pp, seq);
-            }
+            handle_slave_ping_received(pp, seq);
         } else if (header->type == PACKET_TYPE_PONG) {
             handle_conflict(pp, PING_PONG_CONFLICT_SLAVE_RX_PONG);
         }
