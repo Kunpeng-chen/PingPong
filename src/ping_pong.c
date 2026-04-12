@@ -28,6 +28,62 @@ typedef struct {
 /* 最小包长度 = 头部 + CRC */
 #define PING_PONG_MIN_PACKET_SIZE (sizeof(ping_pong_header_t) + PING_PONG_CRC_SIZE)
 
+/* 4.5: 大端字节序编解码 */
+static inline uint16_t get_u16_be(const uint8_t *buf)
+{
+    return ((uint16_t)buf[0] << 8) | buf[1];
+}
+
+/* 4.2: 状态转换事件 */
+typedef enum {
+    EVT_START_MASTER,
+    EVT_START_SLAVE,
+    EVT_STOP,
+    EVT_RESET,
+    EVT_TX_DONE,
+    EVT_RX_DONE,
+    EVT_TIMEOUT,
+    EVT_COUNT
+} pp_event_t;
+
+/* 4.2: Check if a state transition is valid */
+/* 4.2: 合法状态转换矩阵 [当前状态][事件] = 是否允许 */
+static const uint8_t valid_transitions[4][EVT_COUNT] = {
+    /* IDLE: */
+    [PING_PONG_STATE_IDLE] = {
+        [EVT_START_MASTER] = 1, [EVT_START_SLAVE] = 1,
+        [EVT_STOP] = 0, [EVT_RESET] = 1,
+        [EVT_TX_DONE] = 0, [EVT_RX_DONE] = 0, [EVT_TIMEOUT] = 0,
+    },
+    /* TX: */
+    [PING_PONG_STATE_TX] = {
+        [EVT_START_MASTER] = 0, [EVT_START_SLAVE] = 0,
+        [EVT_STOP] = 1, [EVT_RESET] = 1,
+        [EVT_TX_DONE] = 1, [EVT_RX_DONE] = 0, [EVT_TIMEOUT] = 1,
+    },
+    /* RX_WAIT: */
+    [PING_PONG_STATE_RX_WAIT] = {
+        [EVT_START_MASTER] = 0, [EVT_START_SLAVE] = 0,
+        [EVT_STOP] = 1, [EVT_RESET] = 1,
+        [EVT_TX_DONE] = 0, [EVT_RX_DONE] = 1, [EVT_TIMEOUT] = 1,
+    },
+    /* STOPPED: */
+    [PING_PONG_STATE_STOPPED] = {
+        [EVT_START_MASTER] = 1, [EVT_START_SLAVE] = 1,
+        [EVT_STOP] = 0, [EVT_RESET] = 1,
+        [EVT_TX_DONE] = 0, [EVT_RX_DONE] = 0, [EVT_TIMEOUT] = 0,
+    },
+};
+
+/* 4.2: Check if a state transition is valid */
+static int is_valid_transition(ping_pong_state_t state, pp_event_t event)
+{
+    if ((unsigned)state >= 4 || (unsigned)event >= EVT_COUNT) {
+        return 0;
+    }
+    return valid_transitions[state][event];
+}
+
 /* ==================== 内部结构体 ==================== */
 
 struct ping_pong {
@@ -75,6 +131,11 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq);
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void send_tx_request(ping_pong_t *pp);
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type);
+
+/* 4.1: Trace helper macro - calls trace hook if set */
+#define PP_TRACE(pp, msg) do { \
+    if ((pp)->port.trace) { (pp)->port.trace(msg); } \
+} while (0)
 
 /* ==================== 内部函数实现 ==================== */
 
@@ -125,7 +186,7 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
     /* 3.4: Verify CRC over header portion */
     uint32_t header_len = len - PING_PONG_CRC_SIZE;
     uint16_t computed_crc = compute_crc16(data, header_len);
-    uint16_t received_crc = ((uint16_t)data[header_len] << 8) | data[header_len + 1];
+    uint16_t received_crc = get_u16_be(&data[header_len]);
     if (computed_crc != received_crc) {
         return -2; /* CRC error */
     }
@@ -137,7 +198,7 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
     }
     
     /* 3.5: 16-bit sequence number comparison */
-    uint16_t pkt_seq = ((uint16_t)header->seq_hi << 8) | header->seq_lo;
+    uint16_t pkt_seq = get_u16_be(&header->seq_hi);
     if (pkt_seq != (uint16_t)(pp->current_seq & 0xFFFF)) {
         return -1;
     }
@@ -147,6 +208,7 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
 
 static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
 {
+    PP_TRACE(pp, "master: success");
     pp->stats.success_count++;
     pp->stats.last_rtt_ms = rtt_ms;
     pp->stats.last_rssi = pp->last_rssi;
@@ -182,6 +244,7 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
 
 static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
 {
+    PP_TRACE(pp, "master: fail");
     pp->stats.fail_count++;
 
     /* 3.7: Consecutive counters */
@@ -203,6 +266,7 @@ static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
 
 static void handle_master_retry(ping_pong_t *pp)
 {
+    PP_TRACE(pp, "master: retry");
     pp->stats.retry_count++;
     update_stats(pp);
     
@@ -222,6 +286,7 @@ static void handle_master_retry(ping_pong_t *pp)
 
 static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq)
 {
+    PP_TRACE(pp, "slave: ping received");
     pp->current_seq = seq;
     pp->stats.slave_rx_count++;
     update_stats(pp);
@@ -246,6 +311,7 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq)
 
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms)
 {
+    PP_TRACE(pp, "state: enter RX_WAIT");
     ping_pong_notify_t notify;
     memset(&notify, 0, sizeof(notify));
 
@@ -276,6 +342,7 @@ static void send_tx_request(ping_pong_t *pp)
 
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type)
 {
+    PP_TRACE(pp, "conflict detected");
     pp->stats.conflict_count++;
     update_stats(pp);
     
@@ -304,6 +371,7 @@ ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port)
     pp->role = PING_PONG_ROLE_NONE;
     pp->port = *port;
     
+    PP_TRACE(pp, "init: ok");
     return PING_PONG_OK;
 }
 
@@ -347,13 +415,14 @@ ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
     if (!pp->config_set) {
         return PING_PONG_ERR_NOT_CONFIGURED;
     }
-    
-    if (pp->state != PING_PONG_STATE_IDLE && pp->state != PING_PONG_STATE_STOPPED) {
-        return PING_PONG_ERR_INVALID_STATE;
-    }
-    
+
     if (role != PING_PONG_ROLE_MASTER && role != PING_PONG_ROLE_SLAVE) {
         return PING_PONG_ERR_INVALID_PARAM;
+    }
+
+    pp_event_t evt = (role == PING_PONG_ROLE_MASTER) ? EVT_START_MASTER : EVT_START_SLAVE;
+    if (!is_valid_transition(pp->state, evt)) {
+        return PING_PONG_ERR_INVALID_STATE;
     }
 
     previous_role = pp->role;
@@ -393,7 +462,7 @@ ping_pong_err_t ping_pong_stop(ping_pong_t *pp)
         return PING_PONG_ERR_NOT_INITIALIZED;
     }
     
-    if (pp->state == PING_PONG_STATE_IDLE || pp->state == PING_PONG_STATE_STOPPED) {
+    if (!is_valid_transition(pp->state, EVT_STOP)) {
         return PING_PONG_ERR_INVALID_STATE;
     }
     
@@ -505,7 +574,7 @@ ping_pong_err_t ping_pong_on_tx_done(ping_pong_t *pp)
         return PING_PONG_ERR_NOT_INITIALIZED;
     }
     
-    if (pp->state != PING_PONG_STATE_TX) {
+    if (!is_valid_transition(pp->state, EVT_TX_DONE)) {
         return PING_PONG_ERR_INVALID_STATE;
     }
     
@@ -525,7 +594,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
         return PING_PONG_ERR_NOT_INITIALIZED;
     }
     
-    if (pp->state != PING_PONG_STATE_RX_WAIT) {
+    if (!is_valid_transition(pp->state, EVT_RX_DONE)) {
         return PING_PONG_ERR_INVALID_STATE;
     }
     
@@ -538,7 +607,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
     
     const ping_pong_header_t *header = (const ping_pong_header_t *)data;
     /* 3.5: 16-bit seq from packet header */
-    uint16_t seq = ((uint16_t)header->seq_hi << 8) | header->seq_lo;
+    uint16_t seq = get_u16_be(&header->seq_hi);
     
     if (pp->role == PING_PONG_ROLE_MASTER) {
         if (header->type == PACKET_TYPE_PONG) {
@@ -562,7 +631,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
             /* 3.4: Verify CRC before accepting */
             uint32_t header_len = len - PING_PONG_CRC_SIZE;
             uint16_t computed = compute_crc16(data, header_len);
-            uint16_t received = ((uint16_t)data[header_len] << 8) | data[header_len + 1];
+            uint16_t received = get_u16_be(&data[header_len]);
             if (computed != received) {
                 enter_rx_wait(pp, pp->port.get_time_ms());
             } else {

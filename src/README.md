@@ -31,7 +31,37 @@
 
 ## 3. 状态与角色定义
 
-### 3.1 状态（协议阶段）
+### 3.1 状态机（Mermaid 可视化）
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE : init()
+
+    IDLE --> TX : start(MASTER)
+    IDLE --> RX_WAIT : start(SLAVE)
+
+    TX --> RX_WAIT : on_tx_done()
+    TX --> IDLE : tx_timeout (process)
+
+    RX_WAIT --> IDLE : success (Master: Pong 匹配)
+    RX_WAIT --> IDLE : fail (Master: max retries / parse / CRC error)
+    RX_WAIT --> IDLE : conflict
+    RX_WAIT --> TX : retry (Master: 超时重传)
+    RX_WAIT --> TX : ping_received (Slave: 回复 Pong)
+    RX_WAIT --> RX_WAIT : rx_timeout (Slave: 重进等待)
+
+    TX --> STOPPED : stop()
+    RX_WAIT --> STOPPED : stop()
+    STOPPED --> TX : start(MASTER)
+    STOPPED --> RX_WAIT : start(SLAVE)
+
+    IDLE --> IDLE : reset()
+    TX --> IDLE : reset()
+    RX_WAIT --> IDLE : reset()
+    STOPPED --> IDLE : reset()
+```
+
+### 3.2 状态（协议阶段）
 
 | 状态 | 说明 |
 |------|------|
@@ -40,7 +70,7 @@
 | RX_WAIT | 等待接收阶段 |
 | STOPPED | 已停止 |
 
-### 3.2 角色（设备身份）
+### 3.3 角色（设备身份）
 
 | 角色 | 说明 |
 |------|------|
@@ -56,9 +86,11 @@
 
 ## 5. 端口抽象
 
-端口结构体包含两个函数指针：
-- `get_time_ms`：获取当前时间戳（毫秒）
-- `notify`：通知回调
+端口结构体包含以下函数指针和成员：
+- `get_time_ms`：获取当前时间戳（毫秒），必须实现
+- `notify`：通知回调（带 `user_data` 第三参数），必须实现
+- `user_data`：用户上下文指针，传入 `notify` 回调
+- `trace`：可选 Debug Trace 钩子（NULL=不输出），用于状态转换跟踪
 
 ## 6. 通知类型
 
@@ -101,6 +133,7 @@
 | `max_retries` | Master 最大重传次数 |
 | `tx_buffer_size` | 发送缓冲区大小 |
 | `slave_rx_timeout_ms` | Slave 等待超时（0 表示永不超时） |
+| `tx_timeout_ms` | TX 状态超时保护（0 表示不检测） |
 
 ## 9. 统计信息
 
@@ -115,6 +148,11 @@
 | `last_rtt_ms` | 最近 RTT |
 | `last_rssi` | 最近 RSSI |
 | `last_snr` | 最近 SNR |
+| `min_rtt_ms` | 最小 RTT |
+| `max_rtt_ms` | 最大 RTT |
+| `total_rtt_ms` | 累计 RTT（用于计算平均） |
+| `consecutive_success_count` | 连续成功次数 |
+| `consecutive_fail_count` | 连续失败次数 |
 
 ## 10. 资源准则
 
@@ -125,16 +163,42 @@
 
 ## 11. 错误处理
 
+所有 API 返回 `ping_pong_err_t` 枚举：
+
+| 错误码 | 值 | 说明 |
+|--------|-----|------|
+| `PING_PONG_OK` | 0 | 成功 |
+| `PING_PONG_ERR_NULL_PTR` | -1 | 空指针参数 |
+| `PING_PONG_ERR_NOT_INITIALIZED` | -2 | 实例未初始化 |
+| `PING_PONG_ERR_INVALID_STATE` | -3 | 当前状态不允许此操作 |
+| `PING_PONG_ERR_INVALID_PARAM` | -4 | 参数无效 |
+| `PING_PONG_ERR_NOT_CONFIGURED` | -5 | 未设置配置 |
+
 | 场景 | 处理方式 |
 |------|---------|
-| 未初始化调用 | 返回 -1 或默认值 |
-| 非法状态转换 | 忽略，返回 -1 |
-| 解析失败 | 上报 FAIL |
+| 未初始化调用 | 返回 `ERR_NOT_INITIALIZED` |
+| 非法状态转换 | 返回 `ERR_INVALID_STATE` |
+| 解析失败 | 上报 FAIL（PARSE_ERROR） |
+| CRC 校验失败 | 上报 FAIL（CRC_ERROR） |
 | Master 超时 | 重传或上报 FAIL |
+| TX 超时 | 上报 FAIL（TX_TIMEOUT） |
 | Slave 超时 | 上报 RX_TIMEOUT |
 | 角色冲突 | 上报 CONFLICT，上层决策 |
 
-## 12. 依赖关系
+## 12. 包格式
+
+```
++--------+---------+---------+----------+---------+---------+
+| type   | seq_hi  | seq_lo  | reserved | crc_hi  | crc_lo  |
+| 1 byte | 1 byte  | 1 byte  | 1 byte   | 1 byte  | 1 byte  |
++--------+---------+---------+----------+---------+---------+
+```
+
+- **type**: `0x01` = PING, `0x02` = PONG
+- **seq**: 16-bit 序列号（大端）
+- **crc**: CRC-16 CCITT（初始值 0xFFFF，多项式 0x1021，计算范围为前 4 字节）
+
+## 13. 依赖关系
 
 ```
 装配层（main.c）
@@ -146,7 +210,7 @@ PingPong 模块
 
 PingPong 对外部模块的依赖数量为零。
 
-## 13. 装配层职责
+## 14. 装配层职责
 
 - 实现 `get_time_ms` 和 `notify` 回调
 - 分配上下文和发送缓冲区
@@ -156,11 +220,11 @@ PingPong 对外部模块的依赖数量为零。
 - 根据通知执行业务逻辑（如 Master 收到 SUCCESS/FAIL 后重启 start，Slave 收到 RX_TIMEOUT 后重启 start）
 - **不在回调中直接调用 PingPong API**（避免重入），使用标志位或事件队列
 
-## 14. 一句话总结
+## 15. 一句话总结
 
 **PingPong 只做协议：状态机加编解码加超时重传加主从角色管理，时间通过端口注入，事件通过回调通知，冲突上报后由上层决策，对一切硬件和业务逻辑一无所知。**
 
 ---
 
-*文档版本：4.0*
-*最后更新：2026-04-08*
+*文档版本：5.0*
+*最后更新：2026-04-12*
