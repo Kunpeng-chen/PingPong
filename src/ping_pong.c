@@ -3,7 +3,16 @@
  */
 
 #include "ping_pong.h"
-#include <string.h>
+
+/* 5.3: 消除 <string.h> 依赖，使用内联函数替代 memset */
+static inline void pp_memset(void *dst, int val, uint32_t len)
+{
+    uint8_t *p = (uint8_t *)dst;
+    uint32_t i;
+    for (i = 0; i < len; i++) {
+        p[i] = (uint8_t)val;
+    }
+}
 
 /* ==================== 内部常量 ==================== */
 
@@ -149,7 +158,7 @@ static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify)
 static void update_stats(ping_pong_t *pp)
 {
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_STATS_UPDATED;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -230,7 +239,7 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
     update_stats(pp);
     
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_SUCCESS;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -254,7 +263,7 @@ static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
     update_stats(pp);
     
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_FAIL;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -271,7 +280,7 @@ static void handle_master_retry(ping_pong_t *pp)
     update_stats(pp);
     
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_RETRY;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -293,7 +302,7 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq)
 
     /* 通知装配层收到了 Ping */
     ping_pong_notify_t rx_notify;
-    memset(&rx_notify, 0, sizeof(rx_notify));
+    pp_memset(&rx_notify, 0, sizeof(rx_notify));
     rx_notify.type = PING_PONG_NOTIFY_PING_RECEIVED;
     rx_notify.timestamp_ms = pp->port.get_time_ms();
     rx_notify.seq = seq;
@@ -313,7 +322,7 @@ static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms)
 {
     PP_TRACE(pp, "state: enter RX_WAIT");
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
 
     pp->state = PING_PONG_STATE_RX_WAIT;
     pp->rx_start_time = timestamp_ms;
@@ -326,7 +335,7 @@ static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms)
 static void send_tx_request(ping_pong_t *pp)
 {
     ping_pong_notify_t tx_notify;
-    memset(&tx_notify, 0, sizeof(tx_notify));
+    pp_memset(&tx_notify, 0, sizeof(tx_notify));
     tx_notify.type = PING_PONG_NOTIFY_TX_REQUEST;
     tx_notify.timestamp_ms = pp->tx_start_time;
     tx_notify.seq = pp->current_seq;
@@ -347,7 +356,7 @@ static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type)
     update_stats(pp);
     
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_CONFLICT;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -365,7 +374,7 @@ ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port)
         return PING_PONG_ERR_NULL_PTR;
     }
     
-    memset(pp, 0, sizeof(ping_pong_t));
+    pp_memset(pp, 0, sizeof(ping_pong_t));
     pp->magic = PING_PONG_MAGIC;
     pp->state = PING_PONG_STATE_IDLE;
     pp->role = PING_PONG_ROLE_NONE;
@@ -443,7 +452,7 @@ ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
     }
     
     ping_pong_notify_t started;
-    memset(&started, 0, sizeof(started));
+    pp_memset(&started, 0, sizeof(started));
     started.type = PING_PONG_NOTIFY_STARTED;
     started.timestamp_ms = pp->port.get_time_ms();
     started.seq = pp->current_seq;
@@ -469,7 +478,7 @@ ping_pong_err_t ping_pong_stop(ping_pong_t *pp)
     pp->state = PING_PONG_STATE_STOPPED;
     
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_STOPPED;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -495,10 +504,10 @@ ping_pong_err_t ping_pong_reset(ping_pong_t *pp)
     pp->tx_start_time = 0;
     pp->rx_start_time = 0;
     
-    memset(&pp->stats, 0, sizeof(ping_pong_stats_t));
+    pp_memset(&pp->stats, 0, sizeof(ping_pong_stats_t));
     
     ping_pong_notify_t notify;
-    memset(&notify, 0, sizeof(notify));
+    pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_RESET;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = 0;
@@ -552,7 +561,7 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
         timeout_ms = pp->config.slave_rx_timeout_ms;
         if ((now_ms - pp->rx_start_time) >= timeout_ms) {
             ping_pong_notify_t notify;
-            memset(&notify, 0, sizeof(notify));
+            pp_memset(&notify, 0, sizeof(notify));
             notify.type = PING_PONG_NOTIFY_RX_TIMEOUT;
             notify.timestamp_ms = now_ms;
             notify.seq = pp->current_seq;
@@ -674,6 +683,39 @@ ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *st
     }
     
     *stats = pp->stats;
+    return PING_PONG_OK;
+}
+
+/* 5.2: 运行时热更新配置 */
+ping_pong_err_t ping_pong_set_timeout(ping_pong_t *pp, uint32_t timeout_ms)
+{
+    if (!pp) {
+        return PING_PONG_ERR_NULL_PTR;
+    }
+    if (pp->magic != PING_PONG_MAGIC) {
+        return PING_PONG_ERR_NOT_INITIALIZED;
+    }
+    if (timeout_ms == 0) {
+        return PING_PONG_ERR_INVALID_PARAM;
+    }
+    pp->config.timeout_ms = timeout_ms;
+    PP_TRACE(pp, "config: timeout updated");
+    return PING_PONG_OK;
+}
+
+ping_pong_err_t ping_pong_set_max_retries(ping_pong_t *pp, uint32_t max_retries)
+{
+    if (!pp) {
+        return PING_PONG_ERR_NULL_PTR;
+    }
+    if (pp->magic != PING_PONG_MAGIC) {
+        return PING_PONG_ERR_NOT_INITIALIZED;
+    }
+    if (max_retries == 0) {
+        return PING_PONG_ERR_INVALID_PARAM;
+    }
+    pp->config.max_retries = max_retries;
+    PP_TRACE(pp, "config: max_retries updated");
     return PING_PONG_OK;
 }
 

@@ -967,6 +967,51 @@ static void test_slave_crc_error(void)
     printf("  PASS: test_slave_crc_error\n");
 }
 
+/* ==================== Phase 5 新增测试 ==================== */
+
+/* 5.2: Runtime hot-update timeout */
+static void test_set_timeout_runtime(void)
+{
+    init_and_config();
+
+    /* Can update while idle */
+    assert(ping_pong_set_timeout(g_pp, 200) == PING_PONG_OK);
+
+    /* Can update while running */
+    g_time_ms = 100;
+    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
+    assert(ping_pong_set_timeout(g_pp, 500) == PING_PONG_OK);
+
+    /* Zero is invalid */
+    assert(ping_pong_set_timeout(g_pp, 0) == PING_PONG_ERR_INVALID_PARAM);
+
+    /* NULL pointer */
+    assert(ping_pong_set_timeout(NULL, 100) == PING_PONG_ERR_NULL_PTR);
+
+    printf("  PASS: test_set_timeout_runtime\n");
+}
+
+/* 5.2: Runtime hot-update max_retries */
+static void test_set_max_retries_runtime(void)
+{
+    init_and_config();
+
+    assert(ping_pong_set_max_retries(g_pp, 5) == PING_PONG_OK);
+
+    /* Can update while running */
+    g_time_ms = 100;
+    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
+    assert(ping_pong_set_max_retries(g_pp, 10) == PING_PONG_OK);
+
+    /* Zero is invalid */
+    assert(ping_pong_set_max_retries(g_pp, 0) == PING_PONG_ERR_INVALID_PARAM);
+
+    /* NULL pointer */
+    assert(ping_pong_set_max_retries(NULL, 3) == PING_PONG_ERR_NULL_PTR);
+
+    printf("  PASS: test_set_max_retries_runtime\n");
+}
+
 /* ==================== 主函数 ==================== */
 
 int main(void)
@@ -1029,6 +1074,10 @@ int main(void)
     test_consecutive_counters();
     test_slave_crc_error();
 
-    printf("\n=== ALL %d TESTS PASSED ===\n", 35);
+    printf("\n[Phase 5 Tests]\n");
+    test_set_timeout_runtime();
+    test_set_max_retries_runtime();
+
+    printf("\n=== ALL %d TESTS PASSED ===\n", 37);
     return 0;
 }
