@@ -62,7 +62,8 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms);
 static void handle_master_fail(ping_pong_t *pp, uint32_t reason);
 static void handle_master_retry(ping_pong_t *pp);
 static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq);
-static void handle_slave_rx_request(ping_pong_t *pp, uint32_t timestamp_ms);
+static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
+static void send_tx_request(ping_pong_t *pp);
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type);
 
 /* ==================== 内部函数实现 ==================== */
@@ -77,6 +78,7 @@ static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify)
 static void update_stats(ping_pong_t *pp)
 {
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_STATS_UPDATED;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -111,6 +113,7 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
     update_stats(pp);
     
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_SUCCESS;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -128,6 +131,7 @@ static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
     update_stats(pp);
     
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_FAIL;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -143,6 +147,7 @@ static void handle_master_retry(ping_pong_t *pp)
     update_stats(pp);
     
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_RETRY;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -152,13 +157,7 @@ static void handle_master_retry(ping_pong_t *pp)
     pp->state = PING_PONG_STATE_TX;
     pp->tx_start_time = pp->port.get_time_ms();
     
-    ping_pong_notify_t tx_notify;
-    tx_notify.type = PING_PONG_NOTIFY_TX_REQUEST;
-    tx_notify.timestamp_ms = pp->tx_start_time;
-    tx_notify.seq = pp->current_seq;
-    tx_notify.payload.tx_request.tx_buffer = pp->tx_buffer;
-    tx_notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
-    send_notify(pp, &tx_notify);
+    send_tx_request(pp);
 }
 
 static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq)
@@ -169,6 +168,7 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq)
 
     /* 通知装配层收到了 Ping */
     ping_pong_notify_t rx_notify;
+    memset(&rx_notify, 0, sizeof(rx_notify));
     rx_notify.type = PING_PONG_NOTIFY_PING_RECEIVED;
     rx_notify.timestamp_ms = pp->port.get_time_ms();
     rx_notify.seq = seq;
@@ -181,18 +181,14 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint8_t seq)
     pp->state = PING_PONG_STATE_TX;
     pp->tx_start_time = pp->port.get_time_ms();
     
-    ping_pong_notify_t notify;
-    notify.type = PING_PONG_NOTIFY_TX_REQUEST;
-    notify.timestamp_ms = pp->tx_start_time;
-    notify.seq = pp->current_seq;
-    notify.payload.tx_request.tx_buffer = pp->tx_buffer;
-    notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
-    send_notify(pp, &notify);
+    send_tx_request(pp);
 }
 
-static void handle_slave_rx_request(ping_pong_t *pp, uint32_t timestamp_ms)
+/* 1.3: Renamed from handle_slave_rx_request - used by both Master and Slave */
+static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms)
 {
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
 
     pp->state = PING_PONG_STATE_RX_WAIT;
     pp->rx_start_time = timestamp_ms;
@@ -202,12 +198,32 @@ static void handle_slave_rx_request(ping_pong_t *pp, uint32_t timestamp_ms)
     send_notify(pp, &notify);
 }
 
+/* 1.5: Helper to send TX_REQUEST and increment master_tx_count */
+static void send_tx_request(ping_pong_t *pp)
+{
+    ping_pong_notify_t tx_notify;
+    memset(&tx_notify, 0, sizeof(tx_notify));
+    tx_notify.type = PING_PONG_NOTIFY_TX_REQUEST;
+    tx_notify.timestamp_ms = pp->tx_start_time;
+    tx_notify.seq = pp->current_seq;
+    tx_notify.payload.tx_request.tx_buffer = pp->tx_buffer;
+    tx_notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
+
+    /* Increment master_tx_count on every TX_REQUEST (including retries) */
+    if (pp->role == PING_PONG_ROLE_MASTER) {
+        pp->stats.master_tx_count++;
+    }
+
+    send_notify(pp, &tx_notify);
+}
+
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type)
 {
     pp->stats.conflict_count++;
     update_stats(pp);
     
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_CONFLICT;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -287,18 +303,13 @@ int ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
         pp->state = PING_PONG_STATE_TX;
         pp->tx_start_time = pp->port.get_time_ms();
         
-        ping_pong_notify_t notify;
-        notify.type = PING_PONG_NOTIFY_TX_REQUEST;
-        notify.timestamp_ms = pp->tx_start_time;
-        notify.seq = pp->current_seq;
-        notify.payload.tx_request.tx_buffer = pp->tx_buffer;
-        notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
-        send_notify(pp, &notify);
+        send_tx_request(pp);
     } else {
-        handle_slave_rx_request(pp, pp->port.get_time_ms());
+        enter_rx_wait(pp, pp->port.get_time_ms());
     }
     
     ping_pong_notify_t started;
+    memset(&started, 0, sizeof(started));
     started.type = PING_PONG_NOTIFY_STARTED;
     started.timestamp_ms = pp->port.get_time_ms();
     started.seq = pp->current_seq;
@@ -320,6 +331,7 @@ int ping_pong_stop(ping_pong_t *pp)
     pp->state = PING_PONG_STATE_STOPPED;
     
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_STOPPED;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
@@ -344,6 +356,7 @@ int ping_pong_reset(ping_pong_t *pp)
     memset(&pp->stats, 0, sizeof(ping_pong_stats_t));
     
     ping_pong_notify_t notify;
+    memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_RESET;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = 0;
@@ -382,11 +395,12 @@ int ping_pong_process(ping_pong_t *pp)
         timeout_ms = pp->config.slave_rx_timeout_ms;
         if ((now_ms - pp->rx_start_time) >= timeout_ms) {
             ping_pong_notify_t notify;
+            memset(&notify, 0, sizeof(notify));
             notify.type = PING_PONG_NOTIFY_RX_TIMEOUT;
             notify.timestamp_ms = now_ms;
             notify.seq = pp->current_seq;
             send_notify(pp, &notify);
-            handle_slave_rx_request(pp, now_ms);
+            enter_rx_wait(pp, now_ms);
         }
     }
     
@@ -403,12 +417,8 @@ int ping_pong_on_tx_done(ping_pong_t *pp)
         return -1;
     }
     
-    if (pp->role == PING_PONG_ROLE_SLAVE) {
-        handle_slave_rx_request(pp, pp->port.get_time_ms());
-        return 0;
-    }
-    
-    handle_slave_rx_request(pp, pp->port.get_time_ms());
+    /* 1.3: Both Master and Slave enter RX_WAIT after TX completes */
+    enter_rx_wait(pp, pp->port.get_time_ms());
     
     return 0;
 }
@@ -436,20 +446,27 @@ int ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len, int
     if (pp->role == PING_PONG_ROLE_MASTER) {
         if (header->type == PACKET_TYPE_PONG) {
             if (parse_pong_packet(pp, data, len) == 0) {
-                uint32_t rtt_ms = pp->port.get_time_ms() - pp->rx_start_time;
-                pp->stats.master_tx_count++;
+                /* 1.4: RTT from TX start, not RX start */
+                uint32_t rtt_ms = pp->port.get_time_ms() - pp->tx_start_time;
+                /* 1.5: master_tx_count now incremented in send_tx_request() */
                 handle_master_success(pp, rtt_ms);
             } else {
                 handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
             }
         } else if (header->type == PACKET_TYPE_PING) {
             handle_conflict(pp, PING_PONG_CONFLICT_MASTER_RX_PING);
+        } else {
+            /* 1.2: Unknown packet type */
+            handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
         }
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
         if (header->type == PACKET_TYPE_PING) {
             handle_slave_ping_received(pp, seq);
         } else if (header->type == PACKET_TYPE_PONG) {
             handle_conflict(pp, PING_PONG_CONFLICT_SLAVE_RX_PONG);
+        } else {
+            /* 1.2: Unknown packet type - ignore and resume RX */
+            enter_rx_wait(pp, pp->port.get_time_ms());
         }
     }
     
@@ -481,3 +498,7 @@ int ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *stats)
     *stats = pp->stats;
     return 0;
 }
+
+/* 1.6: Compile-time check that context fits within 256 bytes */
+_Static_assert(sizeof(struct ping_pong) <= 256,
+               "struct ping_pong exceeds 256-byte limit");
