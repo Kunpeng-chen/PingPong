@@ -104,7 +104,7 @@ static void on_pingpong_notify(ping_pong_t *pp, const ping_pong_notify_t *notify
             break;
 
         case PING_PONG_NOTIFY_RX_TIMEOUT:
-            /* Master/Slave: 接收超时 */
+            /* Slave: 超时 → 重启接收 */
             if (ping_pong_get_role(pp) == PING_PONG_ROLE_SLAVE) {
                 pending_flags.restart_slave = 1;
             }
@@ -112,10 +112,6 @@ static void on_pingpong_notify(ping_pong_t *pp, const ping_pong_notify_t *notify
 
         case PING_PONG_NOTIFY_RX_PING:
             /* Slave: 收到 Ping，可更新 LED 或日志 */
-            break;
-
-        case PING_PONG_NOTIFY_RX_PONG:
-            /* Master: 收到 Pong，可更新 LED 或日志 */
             break;
 
         default:

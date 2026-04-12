@@ -53,9 +53,8 @@ typedef enum {
     PING_PONG_NOTIFY_SUCCESS,       /**< Ping-Pong 成功 */
     PING_PONG_NOTIFY_FAIL,          /**< Ping-Pong 失败（含角色冲突） */
     PING_PONG_NOTIFY_RETRY,         /**< 发生重传（仅 Master） */
-    PING_PONG_NOTIFY_RX_TIMEOUT,    /**< 接收超时（Master/Slave） */
+    PING_PONG_NOTIFY_RX_TIMEOUT,    /**< 接收超时（仅 Slave） */
     PING_PONG_NOTIFY_RX_PING,       /**< Slave 收到 Ping */
-    PING_PONG_NOTIFY_RX_PONG,       /**< Master 收到 Pong */
 } ping_pong_notify_type_t;
 
 /* ==================== 常量定义 ==================== */
@@ -124,10 +123,6 @@ typedef struct ping_pong_notify {
             int16_t rssi;
             int16_t snr;
         } rx_ping;
-        struct {
-            int16_t rssi;
-            int16_t snr;
-        } rx_pong;
     } payload;
 } ping_pong_notify_t;
 

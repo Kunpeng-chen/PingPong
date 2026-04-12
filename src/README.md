@@ -43,9 +43,9 @@ stateDiagram-v2
     TX --> RX_WAIT : on_tx_done()
     TX --> IDLE : tx_timeout (process)
 
-    RX_WAIT --> IDLE : success (Master: Pong 匹配 → RX_PONG + SUCCESS)
+    RX_WAIT --> IDLE : success (Master: Pong 匹配)
     RX_WAIT --> IDLE : fail (Master: max retries / parse / CRC error / conflict)
-    RX_WAIT --> TX : retry (Master: RX_TIMEOUT → 超时重传)
+    RX_WAIT --> TX : retry (Master: 超时重传)
     RX_WAIT --> TX : rx_ping (Slave: 回复 Pong)
     RX_WAIT --> RX_WAIT : rx_timeout (Slave: 重进等待)
 
@@ -100,9 +100,8 @@ stateDiagram-v2
 | SUCCESS | Ping-Pong 成功 |
 | FAIL | Ping-Pong 失败（含角色冲突） |
 | RETRY | 发生重传（仅 Master） |
-| RX_TIMEOUT | 接收超时（Master/Slave） |
+| RX_TIMEOUT | 接收超时（仅 Slave） |
 | RX_PING | Slave 收到 Ping（携带序列号、RSSI、SNR） |
-| RX_PONG | Master 收到 Pong（携带序列号、RSSI、SNR） |
 
 ## 7. 公开 API
 
@@ -175,7 +174,7 @@ stateDiagram-v2
 | 非法状态转换 | 返回 `ERR_INVALID_STATE` |
 | 解析失败 | 上报 FAIL（PARSE_ERROR） |
 | CRC 校验失败 | 上报 FAIL（CRC_ERROR） |
-| Master 超时 | 上报 RX_TIMEOUT，然后重传或上报 FAIL |
+| Master 超时 | 重传或上报 FAIL |
 | TX 超时 | 上报 FAIL（TX_TIMEOUT） |
 | Slave 超时 | 上报 RX_TIMEOUT |
 | 角色冲突 | 上报 FAIL（CONFLICT），上层决策 |

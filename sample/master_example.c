@@ -130,16 +130,6 @@ static void master_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
                    notify->payload.retry.retry_count, notify->seq);
             break;
 
-        case PING_PONG_NOTIFY_RX_TIMEOUT:
-            printf("  [Master] RX_TIMEOUT: 等待 Pong 超时, seq=%u\n", notify->seq);
-            break;
-
-        case PING_PONG_NOTIFY_RX_PONG:
-            printf("  [Master] RX_PONG: 收到 Pong! RSSI=%d, SNR=%d\n",
-                   notify->payload.rx_pong.rssi,
-                   notify->payload.rx_pong.snr);
-            break;
-
         default:
             break;
     }
