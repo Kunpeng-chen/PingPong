@@ -4,7 +4,7 @@
 
 #include "ping_pong.h"
 
-/* 5.3: 消除 <string.h> 依赖，使用内联函数替代 memset */
+/* 内部 memset 替代，避免引入 <string.h> */
 static inline void pp_memset(void *dst, int val, uint32_t len)
 {
     uint8_t *p = (uint8_t *)dst;
@@ -22,13 +22,13 @@ static inline void pp_memset(void *dst, int val, uint32_t len)
 #define PACKET_TYPE_PING  0x01
 #define PACKET_TYPE_PONG  0x02
 
-/* 3.5: 包头部 - seq 扩展为 uint16_t（大端编码） */
+/* 包头部 */
 typedef struct {
     uint8_t type;
     uint8_t seq_hi;     /* 序列号高字节 */
     uint8_t seq_lo;     /* 序列号低字节 */
     uint8_t reserved;
-    /* 3.4: CRC-16 追加在包尾，不在头部中 */
+    /* CRC-16 追加在包尾 */
 } ping_pong_header_t;
 
 /* CRC-16 大小 */
@@ -37,13 +37,13 @@ typedef struct {
 /* 最小包长度 = 头部 + CRC */
 #define PING_PONG_MIN_PACKET_SIZE (sizeof(ping_pong_header_t) + PING_PONG_CRC_SIZE)
 
-/* 4.5: 大端字节序编解码 */
+/* 大端字节序编解码 */
 static inline uint16_t get_u16_be(const uint8_t *buf)
 {
     return ((uint16_t)buf[0] << 8) | buf[1];
 }
 
-/* 4.2: 状态转换事件 */
+/* 状态转换事件 */
 typedef enum {
     EVT_START_MASTER,
     EVT_START_SLAVE,
@@ -55,8 +55,7 @@ typedef enum {
     EVT_COUNT
 } pp_event_t;
 
-/* 4.2: Check if a state transition is valid */
-/* 4.2: 合法状态转换矩阵 [当前状态][事件] = 是否允许 */
+/* 合法状态转换矩阵 [当前状态][事件] = 是否允许 */
 static const uint8_t valid_transitions[4][EVT_COUNT] = {
     /* IDLE: */
     [PING_PONG_STATE_IDLE] = {
@@ -84,7 +83,7 @@ static const uint8_t valid_transitions[4][EVT_COUNT] = {
     },
 };
 
-/* 4.2: Check if a state transition is valid */
+/* 检查状态转换是否合法 */
 static int is_valid_transition(ping_pong_state_t state, pp_event_t event)
 {
     if ((unsigned)state >= 4 || (unsigned)event >= EVT_COUNT) {
@@ -129,7 +128,6 @@ struct ping_pong {
 /* ==================== 内部函数声明 ==================== */
 
 static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify);
-static void update_stats(ping_pong_t *pp);
 static uint16_t compute_crc16(const uint8_t *data, uint32_t len);
 static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
                         uint8_t expected_type);
@@ -141,7 +139,7 @@ static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void send_tx_request(ping_pong_t *pp);
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type);
 
-/* 4.1: Trace helper macro - calls trace hook if set */
+/* Trace helper macro - calls trace hook if set */
 #define PP_TRACE(pp, msg) do { \
     if ((pp)->port.trace) { (pp)->port.trace(msg); } \
 } while (0)
@@ -155,17 +153,7 @@ static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify)
     }
 }
 
-static void update_stats(ping_pong_t *pp)
-{
-    ping_pong_notify_t notify;
-    pp_memset(&notify, 0, sizeof(notify));
-    notify.type = PING_PONG_NOTIFY_STATS_UPDATED;
-    notify.timestamp_ms = pp->port.get_time_ms();
-    notify.seq = pp->current_seq;
-    send_notify(pp, &notify);
-}
-
-/* 3.4: CRC-16 CCITT (0xFFFF initial, polynomial 0x1021) */
+/* CRC-16 CCITT (0xFFFF initial, polynomial 0x1021) */
 static uint16_t compute_crc16(const uint8_t *data, uint32_t len)
 {
     uint16_t crc = 0xFFFF;
@@ -192,7 +180,7 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
         return -1;
     }
     
-    /* 3.4: Verify CRC over header portion */
+    /* Verify CRC over header portion */
     uint32_t header_len = len - PING_PONG_CRC_SIZE;
     uint16_t computed_crc = compute_crc16(data, header_len);
     uint16_t received_crc = get_u16_be(&data[header_len]);
@@ -206,7 +194,7 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
         return -1;
     }
     
-    /* 3.5: 16-bit sequence number comparison */
+    /* 16-bit 序列号比较 */
     uint16_t pkt_seq = get_u16_be(&header->seq_hi);
     if (pkt_seq != (uint16_t)(pp->current_seq & 0xFFFF)) {
         return -1;
@@ -223,7 +211,7 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
     pp->stats.last_rssi = pp->last_rssi;
     pp->stats.last_snr = pp->last_snr;
 
-    /* 3.6: RTT extended stats */
+    /* RTT 扩展统计 */
     pp->stats.total_rtt_ms += rtt_ms;
     if (pp->stats.success_count == 1 || rtt_ms < pp->stats.min_rtt_ms) {
         pp->stats.min_rtt_ms = rtt_ms;
@@ -232,11 +220,9 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
         pp->stats.max_rtt_ms = rtt_ms;
     }
 
-    /* 3.7: Consecutive counters */
+    /* 连续计数 */
     pp->stats.consecutive_success_count++;
     pp->stats.consecutive_fail_count = 0;
-
-    update_stats(pp);
     
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
@@ -256,11 +242,9 @@ static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
     PP_TRACE(pp, "master: fail");
     pp->stats.fail_count++;
 
-    /* 3.7: Consecutive counters */
+    /* 连续计数 */
     pp->stats.consecutive_fail_count++;
     pp->stats.consecutive_success_count = 0;
-
-    update_stats(pp);
     
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
@@ -277,7 +261,6 @@ static void handle_master_retry(ping_pong_t *pp)
 {
     PP_TRACE(pp, "master: retry");
     pp->stats.retry_count++;
-    update_stats(pp);
     
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
@@ -298,7 +281,6 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq)
     PP_TRACE(pp, "slave: ping received");
     pp->current_seq = seq;
     pp->stats.slave_rx_count++;
-    update_stats(pp);
 
     /* 通知装配层收到了 Ping */
     ping_pong_notify_t rx_notify;
@@ -353,7 +335,6 @@ static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type)
 {
     PP_TRACE(pp, "conflict detected");
     pp->stats.conflict_count++;
-    update_stats(pp);
     
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
@@ -451,13 +432,6 @@ ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
         enter_rx_wait(pp, pp->port.get_time_ms());
     }
     
-    ping_pong_notify_t started;
-    pp_memset(&started, 0, sizeof(started));
-    started.type = PING_PONG_NOTIFY_STARTED;
-    started.timestamp_ms = pp->port.get_time_ms();
-    started.seq = pp->current_seq;
-    send_notify(pp, &started);
-    
     return PING_PONG_OK;
 }
 
@@ -476,13 +450,6 @@ ping_pong_err_t ping_pong_stop(ping_pong_t *pp)
     }
     
     pp->state = PING_PONG_STATE_STOPPED;
-    
-    ping_pong_notify_t notify;
-    pp_memset(&notify, 0, sizeof(notify));
-    notify.type = PING_PONG_NOTIFY_STOPPED;
-    notify.timestamp_ms = pp->port.get_time_ms();
-    notify.seq = pp->current_seq;
-    send_notify(pp, &notify);
     
     return PING_PONG_OK;
 }
@@ -506,13 +473,6 @@ ping_pong_err_t ping_pong_reset(ping_pong_t *pp)
     
     pp_memset(&pp->stats, 0, sizeof(ping_pong_stats_t));
     
-    ping_pong_notify_t notify;
-    pp_memset(&notify, 0, sizeof(notify));
-    notify.type = PING_PONG_NOTIFY_RESET;
-    notify.timestamp_ms = pp->port.get_time_ms();
-    notify.seq = 0;
-    send_notify(pp, &notify);
-    
     return PING_PONG_OK;
 }
 
@@ -528,7 +488,7 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
     
     uint32_t now_ms = pp->port.get_time_ms();
 
-    /* 3.3: TX timeout protection */
+    /* TX 超时保护 */
     if (pp->state == PING_PONG_STATE_TX) {
         if (pp->config.tx_timeout_ms > 0) {
             if ((now_ms - pp->tx_start_time) >= pp->config.tx_timeout_ms) {
@@ -615,7 +575,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
     pp->last_snr = snr;
     
     const ping_pong_header_t *header = (const ping_pong_header_t *)data;
-    /* 3.5: 16-bit seq from packet header */
+    /* 从包头提取 16-bit 序列号 */
     uint16_t seq = get_u16_be(&header->seq_hi);
     
     if (pp->role == PING_PONG_ROLE_MASTER) {
@@ -625,7 +585,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
                 uint32_t rtt_ms = pp->port.get_time_ms() - pp->tx_start_time;
                 handle_master_success(pp, rtt_ms);
             } else if (rc == -2) {
-                /* 3.4: CRC error */
+                /* CRC 校验失败 */
                 handle_master_fail(pp, PING_PONG_FAIL_REASON_CRC_ERROR);
             } else {
                 handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
@@ -637,7 +597,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
         }
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
         if (header->type == PACKET_TYPE_PING) {
-            /* 3.4: Verify CRC before accepting */
+            /* 接受前校验 CRC */
             uint32_t header_len = len - PING_PONG_CRC_SIZE;
             uint16_t computed = compute_crc16(data, header_len);
             uint16_t received = get_u16_be(&data[header_len]);
@@ -683,39 +643,6 @@ ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *st
     }
     
     *stats = pp->stats;
-    return PING_PONG_OK;
-}
-
-/* 5.2: 运行时热更新配置 */
-ping_pong_err_t ping_pong_set_timeout(ping_pong_t *pp, uint32_t timeout_ms)
-{
-    if (!pp) {
-        return PING_PONG_ERR_NULL_PTR;
-    }
-    if (pp->magic != PING_PONG_MAGIC) {
-        return PING_PONG_ERR_NOT_INITIALIZED;
-    }
-    if (timeout_ms == 0) {
-        return PING_PONG_ERR_INVALID_PARAM;
-    }
-    pp->config.timeout_ms = timeout_ms;
-    PP_TRACE(pp, "config: timeout updated");
-    return PING_PONG_OK;
-}
-
-ping_pong_err_t ping_pong_set_max_retries(ping_pong_t *pp, uint32_t max_retries)
-{
-    if (!pp) {
-        return PING_PONG_ERR_NULL_PTR;
-    }
-    if (pp->magic != PING_PONG_MAGIC) {
-        return PING_PONG_ERR_NOT_INITIALIZED;
-    }
-    if (max_retries == 0) {
-        return PING_PONG_ERR_INVALID_PARAM;
-    }
-    pp->config.max_retries = max_retries;
-    PP_TRACE(pp, "config: max_retries updated");
     return PING_PONG_OK;
 }
 

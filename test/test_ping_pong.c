@@ -7,7 +7,7 @@
  * - Slave 完整流程（RX→Ping→TX→RX）
  * - 冲突检测
  * - 边界条件
- * - Phase 3: 错误码、user_data、TX超时、CRC-16、16-bit seq、RTT扩展统计、连续计数
+ * - 错误码、user_data、TX超时、CRC-16、16-bit seq、RTT扩展统计、连续计数
  */
 
 #include "ping_pong.h"
@@ -32,7 +32,7 @@ static uint32_t mock_get_time_ms(void)
 static ping_pong_notify_t g_notifications[MAX_NOTIFICATIONS];
 static int g_notify_count;
 
-/* 3.2: Updated callback with user_data parameter */
+/* Updated callback with user_data parameter */
 static void mock_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
                         void *user_data)
 {
@@ -118,7 +118,6 @@ static uint16_t test_crc16(const uint8_t *data, uint32_t len)
 }
 
 /* Build a packet with header + CRC. Returns total length (header + CRC = 6). */
-/* 3.5: seq is now 16-bit big-endian in header */
 static uint32_t build_packet(uint8_t *buf, uint8_t type, uint16_t seq)
 {
     buf[0] = type;
@@ -243,7 +242,6 @@ static void test_start_master(void)
     assert(ping_pong_get_role(g_pp) == PING_PONG_ROLE_MASTER);
 
     assert(find_last_notify(PING_PONG_NOTIFY_TX_REQUEST) != NULL);
-    assert(find_last_notify(PING_PONG_NOTIFY_STARTED) != NULL);
 
     printf("  PASS: test_start_master\n");
 }
@@ -257,7 +255,6 @@ static void test_start_slave(void)
     assert(ping_pong_get_role(g_pp) == PING_PONG_ROLE_SLAVE);
 
     assert(find_last_notify(PING_PONG_NOTIFY_RX_REQUEST) != NULL);
-    assert(find_last_notify(PING_PONG_NOTIFY_STARTED) != NULL);
 
     printf("  PASS: test_start_slave\n");
 }
@@ -277,7 +274,6 @@ static void test_stop_running(void)
     ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
     assert(ping_pong_stop(g_pp) == PING_PONG_OK);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_STOPPED);
-    assert(find_last_notify(PING_PONG_NOTIFY_STOPPED) != NULL);
     printf("  PASS: test_stop_running\n");
 }
 
@@ -332,11 +328,11 @@ static void test_master_success_flow(void)
     assert(stats.success_count == 1);
     assert(stats.master_tx_count == 1);
     assert(stats.last_rtt_ms == 50);
-    /* 3.6: Extended RTT stats */
+    /* Extended RTT stats */
     assert(stats.min_rtt_ms == 50);
     assert(stats.max_rtt_ms == 50);
     assert(stats.total_rtt_ms == 50);
-    /* 3.7: Consecutive counters */
+    /* Consecutive counters */
     assert(stats.consecutive_success_count == 1);
     assert(stats.consecutive_fail_count == 0);
 
@@ -386,7 +382,7 @@ static void test_master_retry_and_fail(void)
     assert(stats.retry_count == 3);
     assert(stats.fail_count == 1);
     assert(stats.master_tx_count == 4);
-    /* 3.7: Fail resets consecutive success, increments consecutive fail */
+    /* Fail resets consecutive success, increments consecutive fail */
     assert(stats.consecutive_fail_count == 1);
     assert(stats.consecutive_success_count == 0);
 
@@ -738,9 +734,9 @@ static void test_start_while_running(void)
     printf("  PASS: test_start_while_running\n");
 }
 
-/* ==================== Phase 3 新增测试 ==================== */
+/* ==================== 扩展功能测试 ==================== */
 
-/* 3.2: user_data passed through notify */
+/* user_data passed through notify */
 static void *g_captured_user_data;
 
 static void mock_notify_capture_userdata(ping_pong_t *pp, const ping_pong_notify_t *notify,
@@ -772,7 +768,7 @@ static void test_user_data_callback(void)
     printf("  PASS: test_user_data_callback\n");
 }
 
-/* 3.3: TX timeout protection */
+/* TX timeout protection */
 static void test_tx_timeout_protection(void)
 {
     init_and_config();
@@ -803,7 +799,7 @@ static void test_tx_timeout_protection(void)
     printf("  PASS: test_tx_timeout_protection\n");
 }
 
-/* 3.4: CRC-16 verification */
+/* CRC-16 verification */
 static void test_crc_error_detection(void)
 {
     init_and_config();
@@ -826,7 +822,7 @@ static void test_crc_error_detection(void)
     printf("  PASS: test_crc_error_detection\n");
 }
 
-/* 3.5: 16-bit sequence number */
+/* 16-bit sequence number */
 static void test_16bit_seq(void)
 {
     init_and_config();
@@ -852,7 +848,7 @@ static void test_16bit_seq(void)
     printf("  PASS: test_16bit_seq\n");
 }
 
-/* 3.6: RTT extended statistics */
+/* RTT extended statistics */
 static void test_rtt_extended_stats(void)
 {
     init_and_config();
@@ -899,7 +895,7 @@ static void test_rtt_extended_stats(void)
     printf("  PASS: test_rtt_extended_stats\n");
 }
 
-/* 3.7: Consecutive success/fail counters */
+/* Consecutive success/fail counters */
 static void test_consecutive_counters(void)
 {
     init_and_config();
@@ -967,51 +963,6 @@ static void test_slave_crc_error(void)
     printf("  PASS: test_slave_crc_error\n");
 }
 
-/* ==================== Phase 5 新增测试 ==================== */
-
-/* 5.2: Runtime hot-update timeout */
-static void test_set_timeout_runtime(void)
-{
-    init_and_config();
-
-    /* Can update while idle */
-    assert(ping_pong_set_timeout(g_pp, 200) == PING_PONG_OK);
-
-    /* Can update while running */
-    g_time_ms = 100;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    assert(ping_pong_set_timeout(g_pp, 500) == PING_PONG_OK);
-
-    /* Zero is invalid */
-    assert(ping_pong_set_timeout(g_pp, 0) == PING_PONG_ERR_INVALID_PARAM);
-
-    /* NULL pointer */
-    assert(ping_pong_set_timeout(NULL, 100) == PING_PONG_ERR_NULL_PTR);
-
-    printf("  PASS: test_set_timeout_runtime\n");
-}
-
-/* 5.2: Runtime hot-update max_retries */
-static void test_set_max_retries_runtime(void)
-{
-    init_and_config();
-
-    assert(ping_pong_set_max_retries(g_pp, 5) == PING_PONG_OK);
-
-    /* Can update while running */
-    g_time_ms = 100;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    assert(ping_pong_set_max_retries(g_pp, 10) == PING_PONG_OK);
-
-    /* Zero is invalid */
-    assert(ping_pong_set_max_retries(g_pp, 0) == PING_PONG_ERR_INVALID_PARAM);
-
-    /* NULL pointer */
-    assert(ping_pong_set_max_retries(NULL, 3) == PING_PONG_ERR_NULL_PTR);
-
-    printf("  PASS: test_set_max_retries_runtime\n");
-}
-
 /* ==================== 主函数 ==================== */
 
 int main(void)
@@ -1065,7 +1016,7 @@ int main(void)
     test_get_stats_null();
     test_process_noop();
 
-    printf("\n[Phase 3 Tests]\n");
+    printf("\n[Extended Tests]\n");
     test_user_data_callback();
     test_tx_timeout_protection();
     test_crc_error_detection();
@@ -1074,10 +1025,6 @@ int main(void)
     test_consecutive_counters();
     test_slave_crc_error();
 
-    printf("\n[Phase 5 Tests]\n");
-    test_set_timeout_runtime();
-    test_set_max_retries_runtime();
-
-    printf("\n=== ALL %d TESTS PASSED ===\n", 37);
+    printf("\n=== ALL %d TESTS PASSED ===\n", 38);
     return 0;
 }

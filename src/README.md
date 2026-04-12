@@ -96,15 +96,11 @@ stateDiagram-v2
 
 | 通知 | 说明 |
 |------|------|
-| STARTED | 协议已启动 |
-| STOPPED | 协议已停止 |
-| RESET | 协议已重置 |
 | TX_REQUEST | 请求发送包（携带缓冲区指针和大小） |
 | RX_REQUEST | 请求进入接收模式 |
 | SUCCESS | Ping-Pong 成功 |
 | FAIL | Ping-Pong 失败 |
 | RETRY | 发生重传（仅 Master） |
-| STATS_UPDATED | 统计更新 |
 | CONFLICT | 角色冲突 |
 | RX_TIMEOUT | 接收超时（仅 Slave） |
 | PING_RECEIVED | Slave 收到 Ping（携带序列号、RSSI、SNR） |
