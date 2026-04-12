@@ -37,22 +37,42 @@ static volatile struct {
 static void build_ping_packet(uint8_t *buf, uint32_t seq)
 {
     buf[0] = 0x01;  /* type = PING */
-    buf[1] = (uint8_t)seq;
-    buf[2] = 0;
+    buf[1] = (uint8_t)(seq >> 8);    /* seq_hi */
+    buf[2] = (uint8_t)(seq & 0xFF);  /* seq_lo */
     buf[3] = 0;
+    /* CRC-16 CCITT over header */
+    uint16_t crc = 0xFFFF;
+    for (int i = 0; i < 4; i++) {
+        crc ^= (uint16_t)buf[i] << 8;
+        for (int j = 0; j < 8; j++)
+            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+    }
+    buf[4] = (uint8_t)(crc >> 8);
+    buf[5] = (uint8_t)(crc & 0xFF);
 }
 
 static void build_pong_packet(uint8_t *buf, uint32_t seq)
 {
     buf[0] = 0x02;  /* type = PONG */
-    buf[1] = (uint8_t)seq;
-    buf[2] = 0;
+    buf[1] = (uint8_t)(seq >> 8);    /* seq_hi */
+    buf[2] = (uint8_t)(seq & 0xFF);  /* seq_lo */
     buf[3] = 0;
+    /* CRC-16 CCITT over header */
+    uint16_t crc = 0xFFFF;
+    for (int i = 0; i < 4; i++) {
+        crc ^= (uint16_t)buf[i] << 8;
+        for (int j = 0; j < 8; j++)
+            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+    }
+    buf[4] = (uint8_t)(crc >> 8);
+    buf[5] = (uint8_t)(crc & 0xFF);
 }
 
 /* ==================== PingPong 通知回调 ==================== */
-static void on_pingpong_notify(ping_pong_t *pp, const ping_pong_notify_t *notify)
+static void on_pingpong_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
+                               void *user_data)
 {
+    (void)user_data;
     switch (notify->type) {
         case PING_PONG_NOTIFY_TX_REQUEST:
             /* 根据角色填充不同包类型 */
@@ -141,7 +161,8 @@ static void app_init(void)
 {
     ping_pong_port_t port = {
         .get_time_ms = hal_get_tick_ms,
-        .notify = on_pingpong_notify
+        .notify = on_pingpong_notify,
+        .user_data = NULL
     };
     
     ping_pong_config_t config = {
