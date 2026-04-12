@@ -66,13 +66,6 @@ static void on_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
         case PING_PONG_NOTIFY_PING_RECEIVED:
             printf("  [%s] PING_RECEIVED seq=%u\n", label, notify->payload.ping_received.seq);
             break;
-        case PING_PONG_NOTIFY_STARTED:
-            printf("  [%s] STARTED as %s\n", label,
-                   ping_pong_get_role(pp) == PING_PONG_ROLE_MASTER ? "Master" : "Slave");
-            break;
-        case PING_PONG_NOTIFY_STOPPED:
-            printf("  [%s] STOPPED\n", label);
-            break;
         default:
             break;
     }

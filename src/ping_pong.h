@@ -48,15 +48,11 @@ typedef enum {
 
 /** @brief 通知类型 */
 typedef enum {
-    PING_PONG_NOTIFY_STARTED,       /**< 协议已启动 */
-    PING_PONG_NOTIFY_STOPPED,       /**< 协议已停止 */
-    PING_PONG_NOTIFY_RESET,         /**< 协议已重置 */
     PING_PONG_NOTIFY_TX_REQUEST,    /**< 请求发送包（携带缓冲区） */
     PING_PONG_NOTIFY_RX_REQUEST,    /**< 请求进入接收模式 */
     PING_PONG_NOTIFY_SUCCESS,       /**< Ping-Pong 成功 */
     PING_PONG_NOTIFY_FAIL,          /**< Ping-Pong 失败 */
     PING_PONG_NOTIFY_RETRY,         /**< 发生重传（仅 Master） */
-    PING_PONG_NOTIFY_STATS_UPDATED, /**< 统计更新 */
     PING_PONG_NOTIFY_CONFLICT,      /**< 角色冲突检测 */
     PING_PONG_NOTIFY_RX_TIMEOUT,    /**< 接收超时（仅 Slave） */
     PING_PONG_NOTIFY_PING_RECEIVED, /**< Slave 收到 Ping */
@@ -136,16 +132,7 @@ typedef struct ping_pong_notify {
             uint32_t seq;
             int16_t rssi;
             int16_t snr;
-            const uint8_t *user_payload;  /**< 5.1: 用户自定义 payload（接收时） */
-            uint32_t user_payload_len;    /**< 5.1: 用户 payload 长度 */
         } ping_received;
-        struct {
-            const uint8_t *user_payload;  /**< 5.1: 收到的用户 payload（Master 成功时） */
-            uint32_t user_payload_len;    /**< 5.1: 用户 payload 长度 */
-            uint32_t rtt_ms;
-            int16_t rssi;
-            int16_t snr;
-        } success_with_payload;
     } payload;
 } ping_pong_notify_t;
 
@@ -257,22 +244,6 @@ ping_pong_role_t ping_pong_get_role(const ping_pong_t *pp);
  * @return PING_PONG_OK 成功，或错误码
  */
 ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *stats);
-
-/**
- * @brief 运行时修改超时时间（5.2: 热更新）
- * @param pp         PingPong 实例
- * @param timeout_ms 新的超时时间（毫秒，>0）
- * @return PING_PONG_OK 成功，或错误码
- */
-ping_pong_err_t ping_pong_set_timeout(ping_pong_t *pp, uint32_t timeout_ms);
-
-/**
- * @brief 运行时修改最大重试次数（5.2: 热更新）
- * @param pp          PingPong 实例
- * @param max_retries 新的最大重试次数（>0）
- * @return PING_PONG_OK 成功，或错误码
- */
-ping_pong_err_t ping_pong_set_max_retries(ping_pong_t *pp, uint32_t max_retries);
 
 #ifdef __cplusplus
 }
