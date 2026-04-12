@@ -91,6 +91,10 @@ static void master_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
         case PING_PONG_NOTIFY_FAIL:
             printf("  [Master] FAIL reason=%u\n", notify->payload.fail.fail_reason);
             break;
+        case PING_PONG_NOTIFY_RX_PONG:
+            printf("  [Master] RX_PONG RSSI=%d SNR=%d\n",
+                   notify->payload.rx_pong.rssi, notify->payload.rx_pong.snr);
+            break;
         default:
             break;
     }

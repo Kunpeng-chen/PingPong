@@ -220,7 +220,17 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms,
     /* 连续计数 */
     pp->stats.consecutive_success_count++;
     pp->stats.consecutive_fail_count = 0;
-    
+
+    /* 通知装配层收到了 Pong（与 Slave RX_PING 对称） */
+    ping_pong_notify_t rx_notify;
+    pp_memset(&rx_notify, 0, sizeof(rx_notify));
+    rx_notify.type = PING_PONG_NOTIFY_RX_PONG;
+    rx_notify.timestamp_ms = pp->port.get_time_ms();
+    rx_notify.seq = pp->current_seq;
+    rx_notify.payload.rx_pong.rssi = rssi;
+    rx_notify.payload.rx_pong.snr = snr;
+    send_notify(pp, &rx_notify);
+
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
     notify.type = PING_PONG_NOTIFY_SUCCESS;
@@ -507,6 +517,14 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
     if (pp->role == PING_PONG_ROLE_MASTER) {
         timeout_ms = pp->config.timeout_ms;
         if ((now_ms - pp->tx_start_time) >= timeout_ms) {
+            /* 接收超时通知（与 Slave RX_TIMEOUT 对称） */
+            ping_pong_notify_t timeout_notify;
+            pp_memset(&timeout_notify, 0, sizeof(timeout_notify));
+            timeout_notify.type = PING_PONG_NOTIFY_RX_TIMEOUT;
+            timeout_notify.timestamp_ms = now_ms;
+            timeout_notify.seq = pp->current_seq;
+            send_notify(pp, &timeout_notify);
+
             if (pp->current_retry < pp->config.max_retries) {
                 pp->current_retry++;
                 handle_master_retry(pp);

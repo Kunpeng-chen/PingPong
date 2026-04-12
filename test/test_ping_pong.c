@@ -317,6 +317,12 @@ static void test_master_success_flow(void)
     assert(ping_pong_on_rx_done(g_pp, pong, pong_len, -50, 10) == PING_PONG_OK);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_IDLE);
 
+    /* RX_PONG should fire before SUCCESS */
+    const ping_pong_notify_t *rp = find_last_notify(PING_PONG_NOTIFY_RX_PONG);
+    assert(rp != NULL);
+    assert(rp->payload.rx_pong.rssi == -50);
+    assert(rp->payload.rx_pong.snr == 10);
+
     const ping_pong_notify_t *sn = find_last_notify(PING_PONG_NOTIFY_SUCCESS);
     assert(sn != NULL);
     assert(sn->payload.success.rtt_ms == 50);
@@ -352,6 +358,7 @@ static void test_master_retry_and_fail(void)
 
     g_time_ms = 1110;
     ping_pong_process(g_pp);
+    assert(count_notify(PING_PONG_NOTIFY_RX_TIMEOUT) == 1);
     assert(count_notify(PING_PONG_NOTIFY_RETRY) == 1);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
 
@@ -359,18 +366,22 @@ static void test_master_retry_and_fail(void)
     ping_pong_on_tx_done(g_pp);
     g_time_ms = 1230;
     ping_pong_process(g_pp);
+    assert(count_notify(PING_PONG_NOTIFY_RX_TIMEOUT) == 2);
     assert(count_notify(PING_PONG_NOTIFY_RETRY) == 2);
 
     g_time_ms = 1240;
     ping_pong_on_tx_done(g_pp);
     g_time_ms = 1350;
     ping_pong_process(g_pp);
+    assert(count_notify(PING_PONG_NOTIFY_RX_TIMEOUT) == 3);
     assert(count_notify(PING_PONG_NOTIFY_RETRY) == 3);
 
     g_time_ms = 1360;
     ping_pong_on_tx_done(g_pp);
     g_time_ms = 1470;
     ping_pong_process(g_pp);
+    /* Final timeout: RX_TIMEOUT fires, then FAIL (no RETRY) */
+    assert(count_notify(PING_PONG_NOTIFY_RX_TIMEOUT) == 4);
 
     const ping_pong_notify_t *fn = find_last_notify(PING_PONG_NOTIFY_FAIL);
     assert(fn != NULL);
@@ -963,6 +974,77 @@ static void test_slave_crc_error(void)
     printf("  PASS: test_slave_crc_error\n");
 }
 
+/* --- Master RX_PONG + RX_TIMEOUT symmetry --- */
+
+static void test_master_rx_pong_symmetry(void)
+{
+    /* Verify RX_PONG fires before SUCCESS on valid Pong reception */
+    init_and_config();
+    g_time_ms = 1000;
+    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
+    g_time_ms = 1010;
+    ping_pong_on_tx_done(g_pp);
+
+    uint8_t pong[6];
+    build_pong(pong, 0);
+    g_time_ms = 1030;
+    ping_pong_on_rx_done(g_pp, pong, 6, -42, 9);
+
+    /* Both RX_PONG and SUCCESS should be present */
+    assert(count_notify(PING_PONG_NOTIFY_RX_PONG) == 1);
+    assert(count_notify(PING_PONG_NOTIFY_SUCCESS) == 1);
+
+    /* RX_PONG should appear before SUCCESS in notification order */
+    int rx_pong_idx = -1;
+    int success_idx = -1;
+    for (int i = 0; i < g_notify_count; i++) {
+        if (g_notifications[i].type == PING_PONG_NOTIFY_RX_PONG && rx_pong_idx < 0)
+            rx_pong_idx = i;
+        if (g_notifications[i].type == PING_PONG_NOTIFY_SUCCESS && success_idx < 0)
+            success_idx = i;
+    }
+    assert(rx_pong_idx >= 0 && success_idx >= 0);
+    assert(rx_pong_idx < success_idx);
+
+    /* RX_PONG carries RSSI/SNR */
+    const ping_pong_notify_t *rp = find_last_notify(PING_PONG_NOTIFY_RX_PONG);
+    assert(rp->payload.rx_pong.rssi == -42);
+    assert(rp->payload.rx_pong.snr == 9);
+
+    printf("  PASS: test_master_rx_pong_symmetry\n");
+}
+
+static void test_master_rx_timeout_symmetry(void)
+{
+    /* Verify RX_TIMEOUT fires for Master before RETRY */
+    init_and_config();
+    g_time_ms = 1000;
+    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
+    g_time_ms = 1010;
+    ping_pong_on_tx_done(g_pp);
+
+    /* Trigger one timeout → RX_TIMEOUT + RETRY */
+    g_time_ms = 1120;
+    ping_pong_process(g_pp);
+
+    assert(count_notify(PING_PONG_NOTIFY_RX_TIMEOUT) == 1);
+    assert(count_notify(PING_PONG_NOTIFY_RETRY) == 1);
+
+    /* RX_TIMEOUT should appear before RETRY in notification order */
+    int timeout_idx = -1;
+    int retry_idx = -1;
+    for (int i = 0; i < g_notify_count; i++) {
+        if (g_notifications[i].type == PING_PONG_NOTIFY_RX_TIMEOUT && timeout_idx < 0)
+            timeout_idx = i;
+        if (g_notifications[i].type == PING_PONG_NOTIFY_RETRY && retry_idx < 0)
+            retry_idx = i;
+    }
+    assert(timeout_idx >= 0 && retry_idx >= 0);
+    assert(timeout_idx < retry_idx);
+
+    printf("  PASS: test_master_rx_timeout_symmetry\n");
+}
+
 /* ==================== 主函数 ==================== */
 
 int main(void)
@@ -1024,7 +1106,9 @@ int main(void)
     test_rtt_extended_stats();
     test_consecutive_counters();
     test_slave_crc_error();
+    test_master_rx_pong_symmetry();
+    test_master_rx_timeout_symmetry();
 
-    printf("\n=== ALL %d TESTS PASSED ===\n", 38);
+    printf("\n=== ALL %d TESTS PASSED ===\n", 40);
     return 0;
 }

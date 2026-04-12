@@ -66,6 +66,9 @@ static void on_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
         case PING_PONG_NOTIFY_RX_PING:
             printf("  [%s] RX_PING seq=%u\n", label, notify->seq);
             break;
+        case PING_PONG_NOTIFY_RX_PONG:
+            printf("  [%s] RX_PONG seq=%u\n", label, notify->seq);
+            break;
         default:
             break;
     }

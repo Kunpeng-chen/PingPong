@@ -80,6 +80,11 @@ static void multi_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
             printf("  [Instance %d: %s] FAIL reason=%u\n",
                    ctx->id, ctx->name, notify->payload.fail.fail_reason);
             break;
+        case PING_PONG_NOTIFY_RX_PONG:
+            printf("  [Instance %d: %s] RX_PONG RSSI=%d SNR=%d\n",
+                   ctx->id, ctx->name,
+                   notify->payload.rx_pong.rssi, notify->payload.rx_pong.snr);
+            break;
         default:
             break;
     }
