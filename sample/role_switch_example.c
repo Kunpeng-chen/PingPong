@@ -64,7 +64,7 @@ static void on_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
             printf("  [%s] SUCCESS rtt=%u\n", label, notify->payload.success.rtt_ms);
             break;
         case PING_PONG_NOTIFY_PING_RECEIVED:
-            printf("  [%s] PING_RECEIVED seq=%u\n", label, notify->payload.ping_received.seq);
+            printf("  [%s] PING_RECEIVED seq=%u\n", label, notify->seq);
             break;
         default:
             break;

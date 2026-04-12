@@ -109,7 +109,7 @@ static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
             g_slave_tx_done_pending = 1;
             break;
         case PING_PONG_NOTIFY_PING_RECEIVED:
-            printf("  [Slave] Ping received, seq=%u\n", notify->payload.ping_received.seq);
+            printf("  [Slave] Ping received, seq=%u\n", notify->seq);
             break;
         default:
             break;

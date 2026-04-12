@@ -129,7 +129,6 @@ typedef struct ping_pong_notify {
             uint32_t tx_buffer_size;
         } tx_request;
         struct {
-            uint32_t seq;
             int16_t rssi;
             int16_t snr;
         } ping_received;
