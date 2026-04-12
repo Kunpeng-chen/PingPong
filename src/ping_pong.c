@@ -134,7 +134,6 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
                                         int16_t rssi, int16_t snr);
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void send_tx_request(ping_pong_t *pp);
-static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type);
 
 /* Trace helper macro - calls trace hook if set */
 #define PP_TRACE(pp, msg) do { \
@@ -284,11 +283,11 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
     /* 通知装配层收到了 Ping */
     ping_pong_notify_t rx_notify;
     pp_memset(&rx_notify, 0, sizeof(rx_notify));
-    rx_notify.type = PING_PONG_NOTIFY_PING_RECEIVED;
+    rx_notify.type = PING_PONG_NOTIFY_RX_PING;
     rx_notify.timestamp_ms = pp->port.get_time_ms();
     rx_notify.seq = seq;
-    rx_notify.payload.ping_received.rssi = rssi;
-    rx_notify.payload.ping_received.snr = snr;
+    rx_notify.payload.rx_ping.rssi = rssi;
+    rx_notify.payload.rx_ping.snr = snr;
     send_notify(pp, &rx_notify);
     
     /* 回复 Pong */
@@ -329,17 +328,22 @@ static void send_tx_request(ping_pong_t *pp)
     send_notify(pp, &tx_notify);
 }
 
-static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type)
+static void handle_conflict(ping_pong_t *pp)
 {
     PP_TRACE(pp, "conflict detected");
     pp->stats.conflict_count++;
-    
+    pp->stats.fail_count++;
+
+    /* 连续计数 */
+    pp->stats.consecutive_fail_count++;
+    pp->stats.consecutive_success_count = 0;
+
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
-    notify.type = PING_PONG_NOTIFY_CONFLICT;
+    notify.type = PING_PONG_NOTIFY_FAIL;
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
-    notify.payload.conflict.conflict_type = conflict_type;
+    notify.payload.fail.fail_reason = PING_PONG_FAIL_REASON_CONFLICT;
     send_notify(pp, &notify);
     
     pp->state = PING_PONG_STATE_IDLE;
@@ -584,7 +588,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
                 handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
             }
         } else if (header->type == PACKET_TYPE_PING) {
-            handle_conflict(pp, PING_PONG_CONFLICT_MASTER_RX_PING);
+            handle_conflict(pp);
         } else {
             handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
         }
@@ -600,7 +604,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
                 handle_slave_ping_received(pp, seq, rssi, snr);
             }
         } else if (header->type == PACKET_TYPE_PONG) {
-            handle_conflict(pp, PING_PONG_CONFLICT_SLAVE_RX_PONG);
+            handle_conflict(pp);
         } else {
             enter_rx_wait(pp, pp->port.get_time_ms());
         }

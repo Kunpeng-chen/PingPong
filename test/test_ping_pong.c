@@ -457,9 +457,9 @@ static void test_master_conflict(void)
     g_time_ms = 1020;
     ping_pong_on_rx_done(g_pp, ping, 6, -60, 5);
 
-    const ping_pong_notify_t *cn = find_last_notify(PING_PONG_NOTIFY_CONFLICT);
-    assert(cn != NULL);
-    assert(cn->payload.conflict.conflict_type == PING_PONG_CONFLICT_MASTER_RX_PING);
+    const ping_pong_notify_t *fn = find_last_notify(PING_PONG_NOTIFY_FAIL);
+    assert(fn != NULL);
+    assert(fn->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CONFLICT);
 
     printf("  PASS: test_master_conflict\n");
 }
@@ -478,7 +478,7 @@ static void test_slave_complete_flow(void)
     g_time_ms = 2000;
     assert(ping_pong_on_rx_done(g_pp, ping, 6, -40, 8) == PING_PONG_OK);
 
-    assert(find_last_notify(PING_PONG_NOTIFY_PING_RECEIVED) != NULL);
+    assert(find_last_notify(PING_PONG_NOTIFY_RX_PING) != NULL);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
 
     g_time_ms = 2010;
@@ -505,9 +505,9 @@ static void test_slave_conflict(void)
     g_time_ms = 2000;
     ping_pong_on_rx_done(g_pp, pong, 6, -40, 8);
 
-    const ping_pong_notify_t *cn = find_last_notify(PING_PONG_NOTIFY_CONFLICT);
-    assert(cn != NULL);
-    assert(cn->payload.conflict.conflict_type == PING_PONG_CONFLICT_SLAVE_RX_PONG);
+    const ping_pong_notify_t *fn = find_last_notify(PING_PONG_NOTIFY_FAIL);
+    assert(fn != NULL);
+    assert(fn->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CONFLICT);
 
     printf("  PASS: test_slave_conflict\n");
 }

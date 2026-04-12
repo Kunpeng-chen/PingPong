@@ -108,7 +108,7 @@ static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
             loopback_send(notify->payload.tx_request.tx_buffer, 6);
             g_slave_tx_done_pending = 1;
             break;
-        case PING_PONG_NOTIFY_PING_RECEIVED:
+        case PING_PONG_NOTIFY_RX_PING:
             printf("  [Slave] Ping received, seq=%u\n", notify->seq);
             break;
         default:

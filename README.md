@@ -60,7 +60,7 @@ PingPong 模块外部负责：
 - 若超时且未达到最大重试次数，则上报重试并重新发起发送。
 - 若达到最大重试次数仍失败，则上报失败。
 - Slave 启动后进入等待 Ping 状态，收到 Ping 后请求发送 Pong。
-- 若角色收到与预期不符的报文类型，则上报冲突。
+- 若角色收到与预期不符的报文类型，则上报失败（冲突）。
 
 ## 核心接口
 
@@ -75,9 +75,8 @@ PingPong 模块外部负责：
 - `PING_PONG_NOTIFY_SUCCESS`
 - `PING_PONG_NOTIFY_FAIL`
 - `PING_PONG_NOTIFY_RETRY`
-- `PING_PONG_NOTIFY_CONFLICT`
 - `PING_PONG_NOTIFY_RX_TIMEOUT`
-- `PING_PONG_NOTIFY_PING_RECEIVED`
+- `PING_PONG_NOTIFY_RX_PING`
 
 ## 适用场景
 

@@ -44,10 +44,9 @@ stateDiagram-v2
     TX --> IDLE : tx_timeout (process)
 
     RX_WAIT --> IDLE : success (Master: Pong 匹配)
-    RX_WAIT --> IDLE : fail (Master: max retries / parse / CRC error)
-    RX_WAIT --> IDLE : conflict
+    RX_WAIT --> IDLE : fail (Master: max retries / parse / CRC error / conflict)
     RX_WAIT --> TX : retry (Master: 超时重传)
-    RX_WAIT --> TX : ping_received (Slave: 回复 Pong)
+    RX_WAIT --> TX : rx_ping (Slave: 回复 Pong)
     RX_WAIT --> RX_WAIT : rx_timeout (Slave: 重进等待)
 
     TX --> STOPPED : stop()
@@ -99,11 +98,10 @@ stateDiagram-v2
 | TX_REQUEST | 请求发送包（携带缓冲区指针和大小） |
 | RX_REQUEST | 请求进入接收模式 |
 | SUCCESS | Ping-Pong 成功 |
-| FAIL | Ping-Pong 失败 |
+| FAIL | Ping-Pong 失败（含角色冲突） |
 | RETRY | 发生重传（仅 Master） |
-| CONFLICT | 角色冲突 |
 | RX_TIMEOUT | 接收超时（仅 Slave） |
-| PING_RECEIVED | Slave 收到 Ping（携带序列号、RSSI、SNR） |
+| RX_PING | Slave 收到 Ping（携带序列号、RSSI、SNR） |
 
 ## 7. 公开 API
 
@@ -179,7 +177,7 @@ stateDiagram-v2
 | Master 超时 | 重传或上报 FAIL |
 | TX 超时 | 上报 FAIL（TX_TIMEOUT） |
 | Slave 超时 | 上报 RX_TIMEOUT |
-| 角色冲突 | 上报 CONFLICT，上层决策 |
+| 角色冲突 | 上报 FAIL（CONFLICT），上层决策 |
 
 ## 12. 包格式
 

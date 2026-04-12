@@ -108,20 +108,15 @@ static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
             printf("  [Slave] RX_REQUEST: 进入监听模式, seq=%u\n", notify->seq);
             break;
 
-        case PING_PONG_NOTIFY_PING_RECEIVED:
-            printf("  [Slave] PING_RECEIVED: 收到 Ping! seq=%u, RSSI=%d, SNR=%d\n",
+        case PING_PONG_NOTIFY_RX_PING:
+            printf("  [Slave] RX_PING: 收到 Ping! seq=%u, RSSI=%d, SNR=%d\n",
                    notify->seq,
-                   notify->payload.ping_received.rssi,
-                   notify->payload.ping_received.snr);
+                   notify->payload.rx_ping.rssi,
+                   notify->payload.rx_ping.snr);
             break;
 
         case PING_PONG_NOTIFY_RX_TIMEOUT:
             printf("  [Slave] RX_TIMEOUT: 监听超时, 继续等待...\n");
-            break;
-
-        case PING_PONG_NOTIFY_CONFLICT:
-            printf("  [Slave] CONFLICT: 冲突类型=%u\n",
-                   notify->payload.conflict.conflict_type);
             break;
 
         default:

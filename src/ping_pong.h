@@ -51,11 +51,10 @@ typedef enum {
     PING_PONG_NOTIFY_TX_REQUEST,    /**< 请求发送包（携带缓冲区） */
     PING_PONG_NOTIFY_RX_REQUEST,    /**< 请求进入接收模式 */
     PING_PONG_NOTIFY_SUCCESS,       /**< Ping-Pong 成功 */
-    PING_PONG_NOTIFY_FAIL,          /**< Ping-Pong 失败 */
+    PING_PONG_NOTIFY_FAIL,          /**< Ping-Pong 失败（含角色冲突） */
     PING_PONG_NOTIFY_RETRY,         /**< 发生重传（仅 Master） */
-    PING_PONG_NOTIFY_CONFLICT,      /**< 角色冲突检测 */
     PING_PONG_NOTIFY_RX_TIMEOUT,    /**< 接收超时（仅 Slave） */
-    PING_PONG_NOTIFY_PING_RECEIVED, /**< Slave 收到 Ping */
+    PING_PONG_NOTIFY_RX_PING,       /**< Slave 收到 Ping */
 } ping_pong_notify_type_t;
 
 /* ==================== 常量定义 ==================== */
@@ -67,12 +66,7 @@ typedef enum {
 #define PING_PONG_FAIL_REASON_PARSE_ERROR  3  /**< 包解析错误 */
 #define PING_PONG_FAIL_REASON_CRC_ERROR    4  /**< CRC 校验失败 */
 #define PING_PONG_FAIL_REASON_TX_TIMEOUT   5  /**< TX 超时 */
-/** @} */
-
-/** @name 冲突类型 */
-/** @{ */
-#define PING_PONG_CONFLICT_MASTER_RX_PING  1  /**< Master 收到了 Ping */
-#define PING_PONG_CONFLICT_SLAVE_RX_PONG   2  /**< Slave 收到了 Pong */
+#define PING_PONG_FAIL_REASON_CONFLICT     6  /**< 角色冲突（Master 收到 Ping 或 Slave 收到 Pong） */
 /** @} */
 
 /* ==================== 结构体定义 ==================== */
@@ -122,16 +116,13 @@ typedef struct ping_pong_notify {
             uint32_t fail_reason;
         } fail;
         struct {
-            uint32_t conflict_type;
-        } conflict;
-        struct {
             uint8_t *tx_buffer;
             uint32_t tx_buffer_size;
         } tx_request;
         struct {
             int16_t rssi;
             int16_t snr;
-        } ping_received;
+        } rx_ping;
     } payload;
 } ping_pong_notify_t;
 

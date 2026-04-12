@@ -130,11 +130,6 @@ static void master_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
                    notify->payload.retry.retry_count, notify->seq);
             break;
 
-        case PING_PONG_NOTIFY_CONFLICT:
-            printf("  [Master] CONFLICT: 冲突类型=%u\n",
-                   notify->payload.conflict.conflict_type);
-            break;
-
         default:
             break;
     }

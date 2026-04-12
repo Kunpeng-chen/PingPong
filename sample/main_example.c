@@ -110,12 +110,8 @@ static void on_pingpong_notify(ping_pong_t *pp, const ping_pong_notify_t *notify
             }
             break;
 
-        case PING_PONG_NOTIFY_PING_RECEIVED:
+        case PING_PONG_NOTIFY_RX_PING:
             /* Slave: 收到 Ping，可更新 LED 或日志 */
-            break;
-
-        case PING_PONG_NOTIFY_CONFLICT:
-            /* 冲突发生，可根据策略处理 */
             break;
 
         default:
