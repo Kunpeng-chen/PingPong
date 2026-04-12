@@ -103,27 +103,22 @@ struct ping_pong {
     
     /* 配置 */
     ping_pong_config_t config;
-    uint8_t config_set;
     
     /* 端口 */
     ping_pong_port_t port;
     
     /* 运行参数 */
-    uint32_t current_seq;
-    uint32_t current_retry;
+    uint16_t current_seq;
+    uint16_t current_retry;
     uint32_t tx_start_time;
     uint32_t rx_start_time;
     
     /* 统计 */
     ping_pong_stats_t stats;
-    
-    /* 最近接收信息 */
-    int16_t last_rssi;
-    int16_t last_snr;
-    
-    /* 发送缓冲区 */
-    uint8_t *tx_buffer;
 };
+
+/* TX buffer immediately follows the struct in memory */
+#define PP_TX_BUFFER(pp) ((uint8_t *)(pp) + sizeof(struct ping_pong))
 
 /* ==================== 内部函数声明 ==================== */
 
@@ -131,10 +126,12 @@ static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify);
 static uint16_t compute_crc16(const uint8_t *data, uint32_t len);
 static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
                         uint8_t expected_type);
-static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms);
+static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms,
+                                  int16_t rssi, int16_t snr);
 static void handle_master_fail(ping_pong_t *pp, uint32_t reason);
 static void handle_master_retry(ping_pong_t *pp);
-static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq);
+static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
+                                        int16_t rssi, int16_t snr);
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void send_tx_request(ping_pong_t *pp);
 static void handle_conflict(ping_pong_t *pp, uint32_t conflict_type);
@@ -196,20 +193,21 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
     
     /* 16-bit 序列号比较 */
     uint16_t pkt_seq = get_u16_be(&header->seq_hi);
-    if (pkt_seq != (uint16_t)(pp->current_seq & 0xFFFF)) {
+    if (pkt_seq != pp->current_seq) {
         return -1;
     }
     
     return 0;
 }
 
-static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
+static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms,
+                                  int16_t rssi, int16_t snr)
 {
     PP_TRACE(pp, "master: success");
     pp->stats.success_count++;
     pp->stats.last_rtt_ms = rtt_ms;
-    pp->stats.last_rssi = pp->last_rssi;
-    pp->stats.last_snr = pp->last_snr;
+    pp->stats.last_rssi = rssi;
+    pp->stats.last_snr = snr;
 
     /* RTT 扩展统计 */
     pp->stats.total_rtt_ms += rtt_ms;
@@ -230,8 +228,8 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms)
     notify.timestamp_ms = pp->port.get_time_ms();
     notify.seq = pp->current_seq;
     notify.payload.success.rtt_ms = rtt_ms;
-    notify.payload.success.rssi = pp->last_rssi;
-    notify.payload.success.snr = pp->last_snr;
+    notify.payload.success.rssi = rssi;
+    notify.payload.success.snr = snr;
     send_notify(pp, &notify);
     
     pp->state = PING_PONG_STATE_IDLE;
@@ -276,7 +274,8 @@ static void handle_master_retry(ping_pong_t *pp)
     send_tx_request(pp);
 }
 
-static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq)
+static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
+                                        int16_t rssi, int16_t snr)
 {
     PP_TRACE(pp, "slave: ping received");
     pp->current_seq = seq;
@@ -288,9 +287,8 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq)
     rx_notify.type = PING_PONG_NOTIFY_PING_RECEIVED;
     rx_notify.timestamp_ms = pp->port.get_time_ms();
     rx_notify.seq = seq;
-    rx_notify.payload.ping_received.seq = seq;
-    rx_notify.payload.ping_received.rssi = pp->last_rssi;
-    rx_notify.payload.ping_received.snr = pp->last_snr;
+    rx_notify.payload.ping_received.rssi = rssi;
+    rx_notify.payload.ping_received.snr = snr;
     send_notify(pp, &rx_notify);
     
     /* 回复 Pong */
@@ -321,7 +319,7 @@ static void send_tx_request(ping_pong_t *pp)
     tx_notify.type = PING_PONG_NOTIFY_TX_REQUEST;
     tx_notify.timestamp_ms = pp->tx_start_time;
     tx_notify.seq = pp->current_seq;
-    tx_notify.payload.tx_request.tx_buffer = pp->tx_buffer;
+    tx_notify.payload.tx_request.tx_buffer = PP_TX_BUFFER(pp);
     tx_notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
 
     if (pp->role == PING_PONG_ROLE_MASTER) {
@@ -384,8 +382,6 @@ ping_pong_err_t ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *
     }
     
     pp->config = *config;
-    pp->config_set = 1;
-    pp->tx_buffer = (uint8_t*)pp + sizeof(ping_pong_t);
     
     return PING_PONG_OK;
 }
@@ -402,7 +398,7 @@ ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
         return PING_PONG_ERR_NOT_INITIALIZED;
     }
     
-    if (!pp->config_set) {
+    if (pp->config.tx_buffer_size == 0) {
         return PING_PONG_ERR_NOT_CONFIGURED;
     }
 
@@ -571,9 +567,6 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
         return PING_PONG_ERR_INVALID_PARAM;
     }
     
-    pp->last_rssi = rssi;
-    pp->last_snr = snr;
-    
     const ping_pong_header_t *header = (const ping_pong_header_t *)data;
     /* 从包头提取 16-bit 序列号 */
     uint16_t seq = get_u16_be(&header->seq_hi);
@@ -583,7 +576,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
             int rc = parse_packet(pp, data, len, PACKET_TYPE_PONG);
             if (rc == 0) {
                 uint32_t rtt_ms = pp->port.get_time_ms() - pp->tx_start_time;
-                handle_master_success(pp, rtt_ms);
+                handle_master_success(pp, rtt_ms, rssi, snr);
             } else if (rc == -2) {
                 /* CRC 校验失败 */
                 handle_master_fail(pp, PING_PONG_FAIL_REASON_CRC_ERROR);
@@ -604,7 +597,7 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
             if (computed != received) {
                 enter_rx_wait(pp, pp->port.get_time_ms());
             } else {
-                handle_slave_ping_received(pp, seq);
+                handle_slave_ping_received(pp, seq, rssi, snr);
             }
         } else if (header->type == PACKET_TYPE_PONG) {
             handle_conflict(pp, PING_PONG_CONFLICT_SLAVE_RX_PONG);
