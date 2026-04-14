@@ -52,10 +52,7 @@ typedef enum {
     PING_PONG_NOTIFY_RX_REQUEST,    /**< 请求进入接收模式 */
     PING_PONG_NOTIFY_SUCCESS,       /**< Ping-Pong 成功 */
     PING_PONG_NOTIFY_FAIL,          /**< Ping-Pong 失败 */
-    PING_PONG_NOTIFY_RETRY,         /**< 发生重传（仅 Master） */
-    PING_PONG_NOTIFY_CONFLICT,      /**< 角色冲突检测 */
     PING_PONG_NOTIFY_RX_TIMEOUT,    /**< 接收超时（仅 Slave） */
-    PING_PONG_NOTIFY_PING_RECEIVED, /**< Slave 收到 Ping */
 } ping_pong_notify_type_t;
 
 /* ==================== 常量定义 ==================== */
@@ -67,13 +64,11 @@ typedef enum {
 #define PING_PONG_FAIL_REASON_PARSE_ERROR  3  /**< 包解析错误 */
 #define PING_PONG_FAIL_REASON_CRC_ERROR    4  /**< CRC 校验失败 */
 #define PING_PONG_FAIL_REASON_TX_TIMEOUT   5  /**< TX 超时 */
+#define PING_PONG_FAIL_REASON_CONFLICT    6  /**< 角色冲突 */
 /** @} */
 
-/** @name 冲突类型 */
-/** @{ */
-#define PING_PONG_CONFLICT_MASTER_RX_PING  1  /**< Master 收到了 Ping */
-#define PING_PONG_CONFLICT_SLAVE_RX_PONG   2  /**< Slave 收到了 Pong */
-/** @} */
+/** @brief 最小包长度（头部 4 字节 + CRC 2 字节） */
+#define PING_PONG_MIN_PACKET_SIZE  6
 
 /* ==================== 结构体定义 ==================== */
 
@@ -88,20 +83,15 @@ typedef struct {
 
 /** @brief 统计信息（原始计数） */
 typedef struct {
-    uint32_t success_count;            /**< 成功次数 */
-    uint32_t fail_count;               /**< 失败次数 */
-    uint32_t retry_count;              /**< 重传次数 */
-    uint32_t master_tx_count;          /**< Master 发送 Ping 次数 */
-    uint32_t slave_rx_count;           /**< Slave 收到 Ping 次数 */
+    uint32_t success_count;            /**< 成功次数（仅 Master） */
+    uint32_t fail_count;               /**< 失败次数（仅 Master） */
+    uint32_t retry_count;              /**< 重传次数（仅 Master） */
+    uint32_t tx_count;                 /**< 发送次数（Master=Ping, Slave=Pong） */
+    uint32_t rx_count;                 /**< 有效接收次数（Master=Pong, Slave=Ping） */
     uint32_t conflict_count;           /**< 冲突次数 */
-    uint32_t last_rtt_ms;              /**< 最近一次 RTT */
-    int16_t  last_rssi;                /**< 最近一次 RSSI */
-    int16_t  last_snr;                 /**< 最近一次 SNR */
-    uint32_t min_rtt_ms;               /**< 最小 RTT */
-    uint32_t max_rtt_ms;               /**< 最大 RTT */
-    uint32_t total_rtt_ms;             /**< 累计 RTT（用于计算平均） */
-    uint32_t consecutive_success_count; /**< 连续成功次数 */
-    uint32_t consecutive_fail_count;    /**< 连续失败次数 */
+    uint32_t last_rtt_ms;              /**< 最近一次 RTT（仅 Master） */
+    int16_t  last_rssi;                /**< 最近一次收包 RSSI */
+    int16_t  last_snr;                 /**< 最近一次收包 SNR */
 } ping_pong_stats_t;
 
 /** @brief 通知数据结构 */
@@ -111,9 +101,6 @@ typedef struct ping_pong_notify {
     uint32_t seq;
     union {
         struct {
-            uint32_t retry_count;
-        } retry;
-        struct {
             uint32_t rtt_ms;
             int16_t rssi;
             int16_t snr;
@@ -122,16 +109,9 @@ typedef struct ping_pong_notify {
             uint32_t fail_reason;
         } fail;
         struct {
-            uint32_t conflict_type;
-        } conflict;
-        struct {
             uint8_t *tx_buffer;
             uint32_t tx_buffer_size;
         } tx_request;
-        struct {
-            int16_t rssi;
-            int16_t snr;
-        } ping_received;
     } payload;
 } ping_pong_notify_t;
 
@@ -159,8 +139,15 @@ typedef struct {
 /* ==================== API 函数 ==================== */
 
 /**
+ * @brief 获取实例所需内存大小
+ * @param tx_buffer_size 发送缓冲区大小（必须 >= PING_PONG_MIN_PACKET_SIZE）
+ * @return 实例总字节数（内部结构体 + 发送缓冲区）
+ */
+uint32_t ping_pong_instance_size(uint32_t tx_buffer_size);
+
+/**
  * @brief 初始化 PingPong 实例
- * @param pp   指向预分配的 PingPong 上下文（至少 sizeof(ping_pong_t) + tx_buffer_size 字节）
+ * @param pp   指向预分配的内存（至少 ping_pong_instance_size(tx_buffer_size) 字节）
  * @param port 端口配置，包含必需的时间和通知回调
  * @return PING_PONG_OK 成功，或错误码
  */
@@ -243,6 +230,13 @@ ping_pong_role_t ping_pong_get_role(const ping_pong_t *pp);
  * @return PING_PONG_OK 成功，或错误码
  */
 ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *stats);
+
+/**
+ * @brief 检查实例是否有效（已正确初始化）
+ * @param pp PingPong 实例
+ * @return 1 有效，0 无效（NULL 或未初始化）
+ */
+int ping_pong_is_valid(const ping_pong_t *pp);
 
 #ifdef __cplusplus
 }

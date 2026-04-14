@@ -19,10 +19,12 @@
 |- src/
 |  |- ping_pong.h       # 对外 API、配置、通知和类型定义
 |  |- ping_pong.c       # 协议状态机与核心逻辑实现
-|  |- ping_pong_port.h  # 预留端口头文件
 |  `- README.md         # 详细设计原则与边界说明
-`- sample/
-   `- main_example.c    # 集成示例
+|- sample/
+|  |- master_example.c  # Master 角色示例
+|  `- slave_example.c   # Slave 角色示例
+`- test/
+   `- test_ping_pong.c  # 单元测试
 ```
 
 ## 模块边界
@@ -64,20 +66,18 @@ PingPong 模块外部负责：
 
 ## 核心接口
 
+- 内存计算：`ping_pong_instance_size`
 - 生命周期：`ping_pong_init` `ping_pong_set_config` `ping_pong_start` `ping_pong_stop` `ping_pong_reset`
 - 轮询与事件：`ping_pong_process` `ping_pong_on_tx_done` `ping_pong_on_rx_done`
-- 状态查询：`ping_pong_get_state` `ping_pong_get_role` `ping_pong_get_stats`
+- 状态查询：`ping_pong_get_state` `ping_pong_get_role` `ping_pong_get_stats` `ping_pong_is_valid`
 
 主要通知类型包括：
 
 - `PING_PONG_NOTIFY_TX_REQUEST`
 - `PING_PONG_NOTIFY_RX_REQUEST`
 - `PING_PONG_NOTIFY_SUCCESS`
-- `PING_PONG_NOTIFY_FAIL`
-- `PING_PONG_NOTIFY_RETRY`
-- `PING_PONG_NOTIFY_CONFLICT`
+- `PING_PONG_NOTIFY_FAIL`（含 `fail_reason`，涵盖超时/重试耗尽/解析错误/CRC 错误/TX 超时/冲突）
 - `PING_PONG_NOTIFY_RX_TIMEOUT`
-- `PING_PONG_NOTIFY_PING_RECEIVED`
 
 ## 适用场景
 

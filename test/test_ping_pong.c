@@ -292,8 +292,6 @@ static void test_reset(void)
     assert(stats.success_count == 0);
     assert(stats.fail_count == 0);
     assert(stats.retry_count == 0);
-    assert(stats.consecutive_success_count == 0);
-    assert(stats.consecutive_fail_count == 0);
 
     printf("  PASS: test_reset\n");
 }
@@ -326,15 +324,8 @@ static void test_master_success_flow(void)
     ping_pong_stats_t stats;
     ping_pong_get_stats(g_pp, &stats);
     assert(stats.success_count == 1);
-    assert(stats.master_tx_count == 1);
+    assert(stats.tx_count == 1);
     assert(stats.last_rtt_ms == 50);
-    /* Extended RTT stats */
-    assert(stats.min_rtt_ms == 50);
-    assert(stats.max_rtt_ms == 50);
-    assert(stats.total_rtt_ms == 50);
-    /* Consecutive counters */
-    assert(stats.consecutive_success_count == 1);
-    assert(stats.consecutive_fail_count == 0);
 
     printf("  PASS: test_master_success_flow\n");
 }
@@ -352,20 +343,20 @@ static void test_master_retry_and_fail(void)
 
     g_time_ms = 1110;
     ping_pong_process(g_pp);
-    assert(count_notify(PING_PONG_NOTIFY_RETRY) == 1);
+    assert(count_notify(PING_PONG_NOTIFY_TX_REQUEST) == 2);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
 
     g_time_ms = 1120;
     ping_pong_on_tx_done(g_pp);
     g_time_ms = 1230;
     ping_pong_process(g_pp);
-    assert(count_notify(PING_PONG_NOTIFY_RETRY) == 2);
+    assert(count_notify(PING_PONG_NOTIFY_TX_REQUEST) == 3);
 
     g_time_ms = 1240;
     ping_pong_on_tx_done(g_pp);
     g_time_ms = 1350;
     ping_pong_process(g_pp);
-    assert(count_notify(PING_PONG_NOTIFY_RETRY) == 3);
+    assert(count_notify(PING_PONG_NOTIFY_TX_REQUEST) == 4);
 
     g_time_ms = 1360;
     ping_pong_on_tx_done(g_pp);
@@ -381,10 +372,7 @@ static void test_master_retry_and_fail(void)
     ping_pong_get_stats(g_pp, &stats);
     assert(stats.retry_count == 3);
     assert(stats.fail_count == 1);
-    assert(stats.master_tx_count == 4);
-    /* Fail resets consecutive success, increments consecutive fail */
-    assert(stats.consecutive_fail_count == 1);
-    assert(stats.consecutive_success_count == 0);
+    assert(stats.tx_count == 4);
 
     printf("  PASS: test_master_retry_and_fail\n");
 }
@@ -457,9 +445,14 @@ static void test_master_conflict(void)
     g_time_ms = 1020;
     ping_pong_on_rx_done(g_pp, ping, 6, -60, 5);
 
-    const ping_pong_notify_t *cn = find_last_notify(PING_PONG_NOTIFY_CONFLICT);
-    assert(cn != NULL);
-    assert(cn->payload.conflict.conflict_type == PING_PONG_CONFLICT_MASTER_RX_PING);
+    const ping_pong_notify_t *fn = find_last_notify(PING_PONG_NOTIFY_FAIL);
+    assert(fn != NULL);
+    assert(fn->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CONFLICT);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_IDLE);
+
+    ping_pong_stats_t stats;
+    ping_pong_get_stats(g_pp, &stats);
+    assert(stats.conflict_count == 1);
 
     printf("  PASS: test_master_conflict\n");
 }
@@ -478,7 +471,6 @@ static void test_slave_complete_flow(void)
     g_time_ms = 2000;
     assert(ping_pong_on_rx_done(g_pp, ping, 6, -40, 8) == PING_PONG_OK);
 
-    assert(find_last_notify(PING_PONG_NOTIFY_PING_RECEIVED) != NULL);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
 
     g_time_ms = 2010;
@@ -487,7 +479,9 @@ static void test_slave_complete_flow(void)
 
     ping_pong_stats_t stats;
     ping_pong_get_stats(g_pp, &stats);
-    assert(stats.slave_rx_count == 1);
+    assert(stats.rx_count == 1);
+    assert(stats.last_rssi == -40);
+    assert(stats.last_snr == 8);
 
     printf("  PASS: test_slave_complete_flow\n");
 }
@@ -505,9 +499,11 @@ static void test_slave_conflict(void)
     g_time_ms = 2000;
     ping_pong_on_rx_done(g_pp, pong, 6, -40, 8);
 
-    const ping_pong_notify_t *cn = find_last_notify(PING_PONG_NOTIFY_CONFLICT);
-    assert(cn != NULL);
-    assert(cn->payload.conflict.conflict_type == PING_PONG_CONFLICT_SLAVE_RX_PONG);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_RX_WAIT);
+
+    ping_pong_stats_t stats;
+    ping_pong_get_stats(g_pp, &stats);
+    assert(stats.conflict_count == 1);
 
     printf("  PASS: test_slave_conflict\n");
 }
@@ -691,9 +687,9 @@ static void test_rtt_from_tx_start(void)
     printf("  PASS: test_rtt_from_tx_start\n");
 }
 
-/* --- master_tx_count increments on every TX --- */
+/* --- tx_count increments on every TX --- */
 
-static void test_master_tx_count_on_every_tx(void)
+static void test_tx_count_on_every_tx(void)
 {
     init_and_config();
     g_time_ms = 1000;
@@ -701,7 +697,7 @@ static void test_master_tx_count_on_every_tx(void)
 
     ping_pong_stats_t stats;
     ping_pong_get_stats(g_pp, &stats);
-    assert(stats.master_tx_count == 1);
+    assert(stats.tx_count == 1);
 
     g_time_ms = 1010;
     ping_pong_on_tx_done(g_pp);
@@ -709,9 +705,9 @@ static void test_master_tx_count_on_every_tx(void)
     ping_pong_process(g_pp);
 
     ping_pong_get_stats(g_pp, &stats);
-    assert(stats.master_tx_count == 2);
+    assert(stats.tx_count == 2);
 
-    printf("  PASS: test_master_tx_count_on_every_tx\n");
+    printf("  PASS: test_tx_count_on_every_tx\n");
 }
 
 /* --- Config not allowed while running --- */
@@ -773,7 +769,7 @@ static void test_tx_timeout_protection(void)
 {
     init_and_config();
 
-    /* Reconfigure with TX timeout */
+    /* Reconfigure with TX timeout, max_retries = 3 */
     ping_pong_config_t config = g_default_config;
     config.tx_timeout_ms = 50;
     ping_pong_set_config(g_pp, &config);
@@ -787,14 +783,33 @@ static void test_tx_timeout_protection(void)
     ping_pong_process(g_pp);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
 
-    /* Process after TX timeout */
+    /* TX timeout #1 → retry (current_retry becomes 1) */
     g_time_ms = 1060;
+    ping_pong_process(g_pp);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
+
+    /* TX timeout #2 → retry (current_retry becomes 2) */
+    g_time_ms = 1120;
+    ping_pong_process(g_pp);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
+
+    /* TX timeout #3 → retry (current_retry becomes 3 == max_retries) */
+    g_time_ms = 1180;
+    ping_pong_process(g_pp);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
+
+    /* TX timeout #4 → max retries exhausted → fail */
+    g_time_ms = 1240;
     ping_pong_process(g_pp);
 
     const ping_pong_notify_t *fn = find_last_notify(PING_PONG_NOTIFY_FAIL);
     assert(fn != NULL);
     assert(fn->payload.fail.fail_reason == PING_PONG_FAIL_REASON_TX_TIMEOUT);
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_IDLE);
+
+    ping_pong_stats_t stats;
+    ping_pong_get_stats(g_pp, &stats);
+    assert(stats.retry_count == 3);
 
     printf("  PASS: test_tx_timeout_protection\n");
 }
@@ -848,101 +863,6 @@ static void test_16bit_seq(void)
     printf("  PASS: test_16bit_seq\n");
 }
 
-/* RTT extended statistics */
-static void test_rtt_extended_stats(void)
-{
-    init_and_config();
-    g_time_ms = 0;
-
-    /* Round 1: RTT = 50 */
-    g_time_ms = 100;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    g_time_ms = 110;
-    ping_pong_on_tx_done(g_pp);
-    uint8_t pong[6];
-    build_pong(pong, 0);
-    g_time_ms = 150;
-    ping_pong_on_rx_done(g_pp, pong, 6, -50, 10);
-    ping_pong_stop(g_pp);
-
-    /* Round 2: RTT = 30 */
-    g_time_ms = 200;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    g_time_ms = 210;
-    ping_pong_on_tx_done(g_pp);
-    build_pong(pong, 1);
-    g_time_ms = 230;
-    ping_pong_on_rx_done(g_pp, pong, 6, -50, 10);
-    ping_pong_stop(g_pp);
-
-    /* Round 3: RTT = 80 */
-    g_time_ms = 300;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    g_time_ms = 310;
-    ping_pong_on_tx_done(g_pp);
-    build_pong(pong, 2);
-    g_time_ms = 380;
-    ping_pong_on_rx_done(g_pp, pong, 6, -50, 10);
-
-    ping_pong_stats_t stats;
-    ping_pong_get_stats(g_pp, &stats);
-    assert(stats.success_count == 3);
-    assert(stats.min_rtt_ms == 30);
-    assert(stats.max_rtt_ms == 80);
-    assert(stats.total_rtt_ms == 160);  /* 50 + 30 + 80 */
-    assert(stats.last_rtt_ms == 80);
-
-    printf("  PASS: test_rtt_extended_stats\n");
-}
-
-/* Consecutive success/fail counters */
-static void test_consecutive_counters(void)
-{
-    init_and_config();
-    g_time_ms = 0;
-
-    /* 2 successes */
-    g_time_ms = 100;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    g_time_ms = 110;
-    ping_pong_on_tx_done(g_pp);
-    uint8_t pkt[6];
-    build_pong(pkt, 0);
-    g_time_ms = 120;
-    ping_pong_on_rx_done(g_pp, pkt, 6, -50, 10);
-    ping_pong_stop(g_pp);
-
-    g_time_ms = 200;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    g_time_ms = 210;
-    ping_pong_on_tx_done(g_pp);
-    build_pong(pkt, 1);
-    g_time_ms = 220;
-    ping_pong_on_rx_done(g_pp, pkt, 6, -50, 10);
-
-    ping_pong_stats_t stats;
-    ping_pong_get_stats(g_pp, &stats);
-    assert(stats.consecutive_success_count == 2);
-    assert(stats.consecutive_fail_count == 0);
-
-    /* Now a fail */
-    ping_pong_stop(g_pp);
-    g_time_ms = 300;
-    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
-    g_time_ms = 310;
-    ping_pong_on_tx_done(g_pp);
-    /* Wrong seq pong → parse error → fail */
-    build_pong(pkt, 99);
-    g_time_ms = 320;
-    ping_pong_on_rx_done(g_pp, pkt, 6, -50, 10);
-
-    ping_pong_get_stats(g_pp, &stats);
-    assert(stats.consecutive_success_count == 0);
-    assert(stats.consecutive_fail_count == 1);
-
-    printf("  PASS: test_consecutive_counters\n");
-}
-
 /* --- Slave CRC error causes re-enter RX_WAIT --- */
 
 static void test_slave_crc_error(void)
@@ -961,6 +881,80 @@ static void test_slave_crc_error(void)
     assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_RX_WAIT);
 
     printf("  PASS: test_slave_crc_error\n");
+}
+
+/* --- Master TX timeout retry then success --- */
+
+static void test_tx_timeout_retry_then_success(void)
+{
+    init_and_config();
+
+    ping_pong_config_t config = g_default_config;
+    config.tx_timeout_ms = 50;
+    ping_pong_set_config(g_pp, &config);
+
+    g_time_ms = 1000;
+    ping_pong_start(g_pp, PING_PONG_ROLE_MASTER);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
+
+    /* TX timeout → retry #1 */
+    g_time_ms = 1060;
+    ping_pong_process(g_pp);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
+
+    /* This time TX succeeds */
+    g_time_ms = 1070;
+    ping_pong_on_tx_done(g_pp);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_RX_WAIT);
+
+    /* Receive Pong → success */
+    uint8_t pong[6];
+    build_pong(pong, 0);
+    g_time_ms = 1090;
+    ping_pong_on_rx_done(g_pp, pong, 6, -50, 10);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_IDLE);
+
+    const ping_pong_notify_t *sn = find_last_notify(PING_PONG_NOTIFY_SUCCESS);
+    assert(sn != NULL);
+
+    ping_pong_stats_t stats;
+    ping_pong_get_stats(g_pp, &stats);
+    assert(stats.retry_count == 1);
+    assert(stats.success_count == 1);
+
+    printf("  PASS: test_tx_timeout_retry_then_success\n");
+}
+
+/* --- Slave TX timeout falls back to RX_WAIT --- */
+
+static void test_slave_tx_timeout(void)
+{
+    init_and_config();
+
+    ping_pong_config_t config = g_default_config;
+    config.tx_timeout_ms = 50;
+    ping_pong_set_config(g_pp, &config);
+
+    g_time_ms = 1000;
+    ping_pong_start(g_pp, PING_PONG_ROLE_SLAVE);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_RX_WAIT);
+
+    /* Slave receives Ping → enters TX state to send Pong */
+    uint8_t ping[6];
+    build_ping(ping, 0);
+    g_time_ms = 2000;
+    ping_pong_on_rx_done(g_pp, ping, 6, -40, 8);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_TX);
+
+    /* TX timeout → Slave falls back to RX_WAIT */
+    g_time_ms = 2060;
+    ping_pong_process(g_pp);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_RX_WAIT);
+
+    /* No FAIL notification — Slave is passive */
+    assert(find_last_notify(PING_PONG_NOTIFY_FAIL) == NULL);
+
+    printf("  PASS: test_slave_tx_timeout\n");
 }
 
 /* ==================== 主函数 ==================== */
@@ -1000,7 +994,7 @@ int main(void)
     test_master_conflict();
     test_master_seq_increment();
     test_rtt_from_tx_start();
-    test_master_tx_count_on_every_tx();
+    test_tx_count_on_every_tx();
 
     printf("\n[Slave Flow Tests]\n");
     test_slave_complete_flow();
@@ -1019,12 +1013,12 @@ int main(void)
     printf("\n[Extended Tests]\n");
     test_user_data_callback();
     test_tx_timeout_protection();
+    test_tx_timeout_retry_then_success();
+    test_slave_tx_timeout();
     test_crc_error_detection();
     test_16bit_seq();
-    test_rtt_extended_stats();
-    test_consecutive_counters();
     test_slave_crc_error();
 
-    printf("\n=== ALL %d TESTS PASSED ===\n", 38);
+    printf("\n=== ALL %d TESTS PASSED ===\n", 36);
     return 0;
 }

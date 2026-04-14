@@ -99,16 +99,16 @@ stateDiagram-v2
 | TX_REQUEST | 请求发送包（携带缓冲区指针和大小） |
 | RX_REQUEST | 请求进入接收模式 |
 | SUCCESS | Ping-Pong 成功 |
-| FAIL | Ping-Pong 失败 |
-| RETRY | 发生重传（仅 Master） |
-| CONFLICT | 角色冲突 |
+| FAIL | Ping-Pong 失败（`fail_reason` 指明原因：超时/重试耗尽/解析错误/CRC 错误/TX 超时/冲突） |
 | RX_TIMEOUT | 接收超时（仅 Slave） |
-| PING_RECEIVED | Slave 收到 Ping（携带序列号、RSSI、SNR） |
+
+> **注意**：重传只更新内部统计（`retry_count`），不单独发出通知。冲突通过 FAIL 通知上报（`fail_reason = PING_PONG_FAIL_REASON_CONFLICT`）。
 
 ## 7. 公开 API
 
 | 函数 | 说明 |
 |------|------|
+| `instance_size` | 获取实例所需内存大小 |
 | `init` | 初始化，注入端口 |
 | `set_config` | 设置配置（必须在 start 前调用） |
 | `start` | 以指定角色启动 |
@@ -120,6 +120,7 @@ stateDiagram-v2
 | `get_state` | 获取当前状态 |
 | `get_role` | 获取当前角色 |
 | `get_stats` | 获取统计信息 |
+| `is_valid` | 检查实例是否已正确初始化 |
 
 ## 8. 配置参数
 
@@ -138,17 +139,12 @@ stateDiagram-v2
 | `success_count` | 成功次数 |
 | `fail_count` | 失败次数 |
 | `retry_count` | 重传次数 |
-| `master_tx_count` | Master 发送次数 |
-| `slave_rx_count` | Slave 接收次数 |
+| `tx_count` | 发送次数（Master=Ping， Slave=Pong） |
+| `rx_count` | 有效接收次数（Master=Pong， Slave=Ping） |
 | `conflict_count` | 冲突次数 |
-| `last_rtt_ms` | 最近 RTT |
-| `last_rssi` | 最近 RSSI |
-| `last_snr` | 最近 SNR |
-| `min_rtt_ms` | 最小 RTT |
-| `max_rtt_ms` | 最大 RTT |
-| `total_rtt_ms` | 累计 RTT（用于计算平均） |
-| `consecutive_success_count` | 连续成功次数 |
-| `consecutive_fail_count` | 连续失败次数 |
+| `last_rtt_ms` | 最近一次 RTT（仅 Master） |
+| `last_rssi` | 最近一次收包 RSSI |
+| `last_snr` | 最近一次收包 SNR |
 
 ## 10. 资源准则
 
@@ -222,5 +218,5 @@ PingPong 对外部模块的依赖数量为零。
 
 ---
 
-*文档版本：5.0*
-*最后更新：2026-04-12*
+*文档版本：5.1*
+*最后更新：2026-04-14*

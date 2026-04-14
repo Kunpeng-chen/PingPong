@@ -1,29 +1,62 @@
-/*
- * PingPong 从机端示例
+﻿/*
+ * PingPong 从机端接入示例
  *
- * 演示 Slave 角色的典型使用流程：
- * - 初始化（默认从机参数）
- * - 若收到 Ping，则响应 Pong
- * - 若未收到 Ping，则持续监听
- *
- * 本示例使用模拟时间和回调驱动，无需真实硬件。
+ * 接入步骤：
+ *  1. 实现 platform_get_time_ms()、radio_start_tx()、radio_start_rx()
+ *  2. 系统初始化时调用 slave_init()
+ *  3. 主循环中周期调用 slave_process()（间隔 ≤ 10 ms）
+ *  4. 无线发送完成后（中断或回调）调用 slave_on_radio_tx_done()
+ *  5. 无线接收完成后（中断或回调）调用 slave_on_radio_rx_done()
  */
 
 #include "ping_pong.h"
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
 
-/* ==================== 时间模拟 ==================== */
+/* ==================== 配置 ==================== */
 
-static uint32_t g_time_ms = 0;
+#define SLAVE_TX_BUFFER_SIZE  PING_PONG_MIN_PACKET_SIZE
+/*
+ * SLAVE_RX_TIMEOUT_MS = 0  永不超时，持续监听
+ * 非零值：超时后触发 PING_PONG_NOTIFY_RX_TIMEOUT，模块自动重进监听
+ */
+#define SLAVE_RX_TIMEOUT_MS   0
 
-static uint32_t mock_get_time_ms(void)
+/* ==================== 实例内存 ==================== */
+
+static uint8_t g_slave_mem[256 + SLAVE_TX_BUFFER_SIZE];
+#define g_slave ((ping_pong_t *)g_slave_mem)
+
+/* ==================== 平台适配 [需实现] ==================== */
+
+static uint32_t platform_get_time_ms(void)
 {
-    return g_time_ms;
+    /* TODO: 替换为平台 SysTick 或 RTC 计数 */
+    return 0;
 }
 
-/* ==================== CRC-16 辅助 ==================== */
+static void radio_start_tx(const uint8_t *data, uint32_t len)
+{
+    /* TODO: 调用无线芯片 HAL 发送
+     *       发送完成后须调用 slave_on_radio_tx_done() */
+    (void)data;
+    (void)len;
+}
+
+static void radio_start_rx(void)
+{
+    /* TODO: 调用无线芯片 HAL 进入接收模式
+     *       收到数据后须调用 slave_on_radio_rx_done() */
+}
+
+/* ==================== Pong 包编码 ==================== */
+
+/*
+ * 包格式（6 字节）：
+ *   [0]     type     = 0x02 (PONG)
+ *   [1]     seq_hi
+ *   [2]     seq_lo
+ *   [3]     reserved = 0x00
+ *   [4..5]  CRC-16 CCITT（大端，覆盖 [0..3]）
+ */
 
 static uint16_t crc16_ccitt(const uint8_t *data, uint32_t len)
 {
@@ -33,216 +66,111 @@ static uint16_t crc16_ccitt(const uint8_t *data, uint32_t len)
         uint8_t j;
         crc ^= (uint16_t)data[i] << 8;
         for (j = 0; j < 8; j++) {
-            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+            if (crc & 0x8000) {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc = crc << 1;
+            }
         }
     }
     return crc;
 }
 
-static void build_ping_packet(uint8_t *buf, uint16_t seq)
+static void encode_pong(uint8_t *buf, uint16_t seq)
 {
-    buf[0] = 0x01; /* type = PING */
+    uint16_t crc;
+    buf[0] = 0x02;
     buf[1] = (uint8_t)(seq >> 8);
     buf[2] = (uint8_t)(seq & 0xFF);
     buf[3] = 0;
-    uint16_t crc = crc16_ccitt(buf, 4);
+    crc    = crc16_ccitt(buf, 4);
     buf[4] = (uint8_t)(crc >> 8);
     buf[5] = (uint8_t)(crc & 0xFF);
 }
 
-static void build_pong_packet(uint8_t *buf, uint16_t seq)
-{
-    buf[0] = 0x02; /* type = PONG */
-    buf[1] = (uint8_t)(seq >> 8);
-    buf[2] = (uint8_t)(seq & 0xFF);
-    buf[3] = 0;
-    uint16_t crc = crc16_ccitt(buf, 4);
-    buf[4] = (uint8_t)(crc >> 8);
-    buf[5] = (uint8_t)(crc & 0xFF);
-}
+/* ==================== 通知回调 ==================== */
 
-/* ==================== 模拟发送通道 ==================== */
-
-static uint8_t g_tx_buf[128];
-static uint32_t g_tx_len;
-static int g_tx_done_pending;
-
-static void mock_radio_send(const uint8_t *data, uint32_t len)
-{
-    if (len > sizeof(g_tx_buf)) {
-        len = sizeof(g_tx_buf);
-    }
-    memcpy(g_tx_buf, data, len);
-    g_tx_len = len;
-    g_tx_done_pending = 1;
-}
-
-/* ==================== Slave 实例 ==================== */
-
-static uint8_t g_slave_mem[512];
-#define g_slave ((ping_pong_t *)g_slave_mem)
-
-/* 状态标志 */
-static int g_rx_listening;
-
-/* ==================== 回调实现 ==================== */
-
-static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
+static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *n,
                          void *user_data)
 {
     (void)pp;
     (void)user_data;
 
-    switch (notify->type) {
-        case PING_PONG_NOTIFY_TX_REQUEST:
-            /* 构建 Pong 包并模拟发送 */
-            build_pong_packet(notify->payload.tx_request.tx_buffer,
-                              (uint16_t)notify->seq);
-            mock_radio_send(notify->payload.tx_request.tx_buffer,
-                            notify->payload.tx_request.tx_buffer_size);
-            printf("  [Slave] TX_REQUEST: 发送 Pong, seq=%u\n", notify->seq);
-            break;
+    switch (n->type) {
 
-        case PING_PONG_NOTIFY_RX_REQUEST:
-            g_rx_listening = 1;
-            printf("  [Slave] RX_REQUEST: 进入监听模式, seq=%u\n", notify->seq);
-            break;
+    case PING_PONG_NOTIFY_TX_REQUEST:
+        /* 将 Pong 包写入模块提供的发送缓冲区，然后启动无线发送 */
+        encode_pong(n->payload.tx_request.tx_buffer, (uint16_t)n->seq);
+        radio_start_tx(n->payload.tx_request.tx_buffer,
+                       n->payload.tx_request.tx_buffer_size);
+        break;
 
-        case PING_PONG_NOTIFY_PING_RECEIVED:
-            printf("  [Slave] PING_RECEIVED: 收到 Ping! seq=%u, RSSI=%d, SNR=%d\n",
-                   notify->seq,
-                   notify->payload.ping_received.rssi,
-                   notify->payload.ping_received.snr);
-            break;
+    case PING_PONG_NOTIFY_RX_REQUEST:
+        /* 模块已切换到等待状态，启动无线接收 */
+        radio_start_rx();
+        break;
 
-        case PING_PONG_NOTIFY_RX_TIMEOUT:
-            printf("  [Slave] RX_TIMEOUT: 监听超时, 继续等待...\n");
-            break;
+    case PING_PONG_NOTIFY_RX_TIMEOUT:
+        /* 模块自动重进 RX_WAIT 并再次发出 RX_REQUEST
+         * 此处可添加超时统计或告警逻辑 */
+        break;
 
-        case PING_PONG_NOTIFY_CONFLICT:
-            printf("  [Slave] CONFLICT: 冲突类型=%u\n",
-                   notify->payload.conflict.conflict_type);
-            break;
-
-        default:
-            break;
+    default:
+        break;
     }
 }
 
-/* ==================== 场景模拟 ==================== */
+/* ==================== 对外接口 ==================== */
 
-/*
- * 场景 1：正常接收 Ping 并响应 Pong
- *   Slave 监听 → 收到 Ping → 回复 Pong → TX 完成 → 回到监听
- */
-static void scenario_receive_and_respond(uint32_t base_time, uint16_t seq)
+void slave_init(void)
 {
-    printf("\n--- 场景: 收到 Ping 并响应 Pong (seq=%u) ---\n", seq);
+    ping_pong_port_t port = {
+        .get_time_ms = platform_get_time_ms,
+        .notify      = slave_notify,
+        .user_data   = NULL,
+        .trace       = NULL,
+    };
+    /*
+     * timeout_ms / max_retries 为 Slave 不使用的字段，填写合法最小值即可。
+     * tx_buffer_size 须 >= PING_PONG_MIN_PACKET_SIZE。
+     */
+    ping_pong_config_t config = {
+        .timeout_ms          = 1,
+        .max_retries         = 1,
+        .tx_buffer_size      = SLAVE_TX_BUFFER_SIZE,
+        .slave_rx_timeout_ms = SLAVE_RX_TIMEOUT_MS,
+        .tx_timeout_ms       = 0,
+    };
 
-    /* 模拟收到来自 Master 的 Ping */
-    uint8_t ping[6];
-    build_ping_packet(ping, seq);
-    g_time_ms = base_time;
-    g_tx_done_pending = 0;
-    ping_pong_on_rx_done(g_slave, ping, 6, -48, 11);
-
-    /* Pong 发送完成 → 回到 RX_WAIT 监听 */
-    g_time_ms = base_time + 10;
-    if (g_tx_done_pending) {
-        g_tx_done_pending = 0;
-        ping_pong_on_tx_done(g_slave);
-    }
+    ping_pong_init(g_slave, &port);
+    ping_pong_set_config(g_slave, &config);
+    ping_pong_start(g_slave, PING_PONG_ROLE_SLAVE);
 }
 
-/*
- * 场景 2：持续监听，未收到 Ping
- *   Slave 持续 process → 无超时（slave_rx_timeout_ms=0）→ 保持监听
- */
-static void scenario_keep_listening(uint32_t base_time)
+/* 在主循环中周期调用，建议间隔 ≤ 10 ms */
+void slave_process(void)
 {
-    uint32_t i;
-    printf("\n--- 场景: 持续监听（无 Ping） ---\n");
-
-    /* 模拟多次 process 调用，Slave 保持在 RX_WAIT */
-    for (i = 0; i < 5; i++) {
-        g_time_ms = base_time + i * 1000;
-        ping_pong_process(g_slave);
-    }
-
-    ping_pong_state_t state = ping_pong_get_state(g_slave);
-    printf("  [Slave] 经过 %u 次 process 后状态: %s\n",
-           (unsigned)i,
-           (state == PING_PONG_STATE_RX_WAIT) ? "RX_WAIT (持续监听)" : "其他");
+    ping_pong_process(g_slave);
+    /* 无需手动重启：Slave 在 Pong 发完后自动回到 RX_WAIT */
 }
 
-/*
- * 场景 3：带超时的持续监听
- *   设置 slave_rx_timeout_ms 后超时重新进入监听
- *   （本示例中 slave_rx_timeout_ms=0，不会超时，此场景仅做说明）
- */
+/* 无线发送完成中断/回调中调用 */
+void slave_on_radio_tx_done(void)
+{
+    ping_pong_on_tx_done(g_slave);
+}
 
-/* ==================== 主函数 ==================== */
+/* 无线接收完成中断/回调中调用 */
+void slave_on_radio_rx_done(const uint8_t *data, uint32_t len,
+                            int16_t rssi, int16_t snr)
+{
+    ping_pong_on_rx_done(g_slave, data, len, rssi, snr);
+}
 
 int main(void)
 {
-    printf("=== PingPong 从机端示例 ===\n");
-    printf("配置: 默认从机参数, slave_rx_timeout_ms=0 (永不超时)\n");
-
-    /* 初始化 */
-    memset(g_slave_mem, 0, sizeof(g_slave_mem));
-
-    ping_pong_port_t port = {
-        .get_time_ms = mock_get_time_ms,
-        .notify = slave_notify,
-        .user_data = NULL,
-        .trace = NULL,
-    };
-
-    ping_pong_config_t config = {
-        .timeout_ms = 3000,          /* Master 超时参数（Slave 不使用） */
-        .max_retries = 3,            /* Master 重传参数（Slave 不使用） */
-        .tx_buffer_size = 64,        /* 发送缓冲区（Pong 回复需要） */
-        .slave_rx_timeout_ms = 0,    /* 0=永不超时，持续监听 */
-        .tx_timeout_ms = 0,          /* 不启用 TX 超时保护 */
-    };
-
-    assert(ping_pong_init(g_slave, &port) == PING_PONG_OK);
-    assert(ping_pong_set_config(g_slave, &config) == PING_PONG_OK);
-
-    /* 启动 Slave，进入监听模式 */
-    g_time_ms = 0;
-    ping_pong_start(g_slave, PING_PONG_ROLE_SLAVE);
-
-    /*
-     * 场景 1: 收到 Ping 并响应 Pong (seq=0)
-     * 监听 → 收到 Ping → 回复 Pong → 回到监听
-     */
-    scenario_receive_and_respond(100, 0);
-
-    /*
-     * 场景 2: 持续监听，无 Ping 到来
-     * 多次 process → 保持 RX_WAIT 状态
-     */
-    scenario_keep_listening(1000);
-
-    /*
-     * 场景 3: 再次收到 Ping 并响应 (seq=1)
-     * 验证 Slave 可连续处理多次 Ping
-     */
-    scenario_receive_and_respond(6000, 1);
-
-    /*
-     * 场景 4: 第三次收到 Ping (seq=2)
-     */
-    scenario_receive_and_respond(8000, 2);
-
-    /* 打印最终统计 */
-    ping_pong_stats_t stats;
-    ping_pong_get_stats(g_slave, &stats);
-    printf("\n========== 最终统计 ==========\n");
-    printf("收到 Ping 次数: %u\n", stats.slave_rx_count);
-    printf("冲突次数: %u\n", stats.conflict_count);
-
-    printf("\n=== 从机端示例完成 ===\n");
-    return 0;
+    slave_init();
+    for (;;) {
+        slave_process();
+    }
 }
