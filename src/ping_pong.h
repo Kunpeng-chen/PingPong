@@ -28,7 +28,6 @@ typedef enum {
     PING_PONG_ERR_NOT_INITIALIZED = -2, /**< 实例未初始化（magic 不匹配） */
     PING_PONG_ERR_INVALID_STATE   = -3, /**< 当前状态不允许此操作 */
     PING_PONG_ERR_INVALID_PARAM   = -4, /**< 参数无效 */
-    PING_PONG_ERR_NOT_CONFIGURED  = -5, /**< 未设置配置 */
 } ping_pong_err_t;
 
 /** @brief 协议状态（阶段，不携带角色信息） */
@@ -70,15 +69,41 @@ typedef enum {
 /** @brief 最小包长度（头部 4 字节 + CRC 2 字节） */
 #define PING_PONG_MIN_PACKET_SIZE  6
 
+/** @name 配置上界（可在编译时覆盖） */
+/** @{ */
+#ifndef PING_PONG_MAX_TIMEOUT_MS
+#define PING_PONG_MAX_TIMEOUT_MS   600000  /**< 最大超时 10 分钟 */
+#endif
+#ifndef PING_PONG_MAX_RETRIES
+#define PING_PONG_MAX_RETRIES      255     /**< 最大重试次数 */
+#endif
+/** @} */
+
+/** @brief 发送缓冲区大小（编译时固定，可通过 -D 覆盖，必须 >= PING_PONG_MIN_PACKET_SIZE） */
+#ifndef PING_PONG_TX_BUFFER_SIZE
+#define PING_PONG_TX_BUFFER_SIZE   PING_PONG_MIN_PACKET_SIZE
+#endif
+
+/** @name 配置默认值（可在编译时通过 -D 覆盖） */
+/** @{ */
+#ifndef PING_PONG_DEFAULT_MAX_RETRIES
+#define PING_PONG_DEFAULT_MAX_RETRIES    3      /**< 默认最大重传次数 */
+#endif
+#ifndef PING_PONG_DEFAULT_RX_TIMEOUT_MS
+#define PING_PONG_DEFAULT_RX_TIMEOUT_MS  3000   /**< 默认接收等待超时（毫秒） */
+#endif
+#ifndef PING_PONG_DEFAULT_TX_TIMEOUT_MS
+#define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000   /**< 默认 TX 状态超时保护（毫秒） */
+#endif
+/** @} */
+
 /* ==================== 结构体定义 ==================== */
 
-/** @brief 配置参数（必须由调用者设置） */
+/** @brief 配置参数（init 时自动填充默认值，可通过 set_config 覆盖） */
 typedef struct {
-    uint32_t timeout_ms;               /**< 等待回复的超时时间 */
-    uint32_t max_retries;              /**< 最大重传次数（仅 Master） */
-    uint32_t tx_buffer_size;           /**< 发送缓冲区大小 */
-    uint32_t slave_rx_timeout_ms;      /**< Slave 模式下等待 Master Ping 的超时（0=永不超时） */
-    uint32_t tx_timeout_ms;            /**< TX 状态超时保护（0=不检测，默认） */
+    uint32_t max_retries;              /**< 最大重传次数（仅 Master，Slave 忽略） */
+    uint32_t rx_timeout_ms;            /**< 等待 Ping/Pong 超时（Master 必须>0，Slave 0=永不超时） */
+    uint32_t tx_timeout_ms;            /**< TX 状态超时保护（0=不检测，Master/Slave 通用） */
 } ping_pong_config_t;
 
 /** @brief 统计信息（原始计数） */
@@ -140,14 +165,13 @@ typedef struct {
 
 /**
  * @brief 获取实例所需内存大小
- * @param tx_buffer_size 发送缓冲区大小（必须 >= PING_PONG_MIN_PACKET_SIZE）
- * @return 实例总字节数（内部结构体 + 发送缓冲区）
+ * @return 实例总字节数（内部结构体 + PING_PONG_TX_BUFFER_SIZE）
  */
-uint32_t ping_pong_instance_size(uint32_t tx_buffer_size);
+uint32_t ping_pong_instance_size(void);
 
 /**
  * @brief 初始化 PingPong 实例
- * @param pp   指向预分配的内存（至少 ping_pong_instance_size(tx_buffer_size) 字节）
+ * @param pp   指向预分配的内存（至少 ping_pong_instance_size() 字节）
  * @param port 端口配置，包含必需的时间和通知回调
  * @return PING_PONG_OK 成功，或错误码
  */

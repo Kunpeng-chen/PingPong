@@ -10,6 +10,7 @@
  * - 错误码、user_data、TX超时、CRC-16、16-bit seq、RTT扩展统计、连续计数
  */
 
+#define PING_PONG_TX_BUFFER_SIZE 64  /* Override default for testing */
 #include "ping_pong.h"
 #include <assert.h>
 #include <stdio.h>
@@ -90,10 +91,8 @@ static ping_pong_port_t g_port = {
 };
 
 static ping_pong_config_t g_default_config = {
-    .timeout_ms = 100,
     .max_retries = 3,
-    .tx_buffer_size = 64,
-    .slave_rx_timeout_ms = 5000,
+    .rx_timeout_ms = 100,
     .tx_timeout_ms = 0,  /* Disabled by default */
 };
 
@@ -200,18 +199,17 @@ static void test_config_bad_values(void)
     memset(g_ctx_mem, 0, sizeof(g_ctx_mem));
     ping_pong_init(g_pp, &g_port);
 
-    ping_pong_config_t bad = g_default_config;
+    /* set_config now accepts all values; role-specific validation is in start */
+    ping_pong_config_t cfg = g_default_config;
+    cfg.rx_timeout_ms = 0;
+    cfg.max_retries = 0;
+    assert(ping_pong_set_config(g_pp, &cfg) == PING_PONG_OK);
 
-    bad.timeout_ms = 0;
-    assert(ping_pong_set_config(g_pp, &bad) == PING_PONG_ERR_INVALID_PARAM);
-    bad = g_default_config;
+    /* Master start should reject timeout_ms=0 */
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_MASTER) == PING_PONG_ERR_INVALID_PARAM);
 
-    bad.max_retries = 0;
-    assert(ping_pong_set_config(g_pp, &bad) == PING_PONG_ERR_INVALID_PARAM);
-    bad = g_default_config;
-
-    bad.tx_buffer_size = 0;
-    assert(ping_pong_set_config(g_pp, &bad) == PING_PONG_ERR_INVALID_PARAM);
+    /* Slave start should succeed with timeout_ms=0, max_retries=0 */
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_SLAVE) == PING_PONG_OK);
 
     printf("  PASS: test_config_bad_values\n");
 }
@@ -222,7 +220,8 @@ static void test_start_without_config(void)
 {
     memset(g_ctx_mem, 0, sizeof(g_ctx_mem));
     ping_pong_init(g_pp, &g_port);
-    assert(ping_pong_start(g_pp, PING_PONG_ROLE_MASTER) == PING_PONG_ERR_NOT_CONFIGURED);
+    /* init 已填充默认配置，无需 set_config 即可启动 */
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
     printf("  PASS: test_start_without_config\n");
 }
 
@@ -556,7 +555,7 @@ static void test_slave_no_timeout(void)
     init_and_config();
 
     ping_pong_config_t config = g_default_config;
-    config.slave_rx_timeout_ms = 0;
+    config.rx_timeout_ms = 0;
     ping_pong_set_config(g_pp, &config);
 
     g_time_ms = 1000;
@@ -957,6 +956,56 @@ static void test_slave_tx_timeout(void)
     printf("  PASS: test_slave_tx_timeout\n");
 }
 
+/* --- Master upper-bound config rejection --- */
+
+static void test_master_upper_bound_config(void)
+{
+    memset(g_ctx_mem, 0, sizeof(g_ctx_mem));
+    ping_pong_init(g_pp, &g_port);
+
+    ping_pong_config_t cfg = g_default_config;
+
+    /* timeout_ms exceeds max */
+    cfg.rx_timeout_ms = PING_PONG_MAX_TIMEOUT_MS + 1;
+    ping_pong_set_config(g_pp, &cfg);
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_MASTER) == PING_PONG_ERR_INVALID_PARAM);
+
+    /* max_retries exceeds max */
+    cfg = g_default_config;
+    cfg.max_retries = PING_PONG_MAX_RETRIES + 1;
+    ping_pong_set_config(g_pp, &cfg);
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_MASTER) == PING_PONG_ERR_INVALID_PARAM);
+
+    /* Both at max boundary — should succeed */
+    cfg = g_default_config;
+    cfg.rx_timeout_ms = PING_PONG_MAX_TIMEOUT_MS;
+    cfg.max_retries = PING_PONG_MAX_RETRIES;
+    ping_pong_set_config(g_pp, &cfg);
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
+
+    printf("  PASS: test_master_upper_bound_config\n");
+}
+
+/* --- Slave starts with zero timeout_ms/max_retries --- */
+
+static void test_slave_ignores_master_fields(void)
+{
+    memset(g_ctx_mem, 0, sizeof(g_ctx_mem));
+    ping_pong_init(g_pp, &g_port);
+
+    ping_pong_config_t cfg = {
+        .max_retries = 0,
+        .rx_timeout_ms = 0,
+        .tx_timeout_ms = 0,
+    };
+    ping_pong_set_config(g_pp, &cfg);
+
+    assert(ping_pong_start(g_pp, PING_PONG_ROLE_SLAVE) == PING_PONG_OK);
+    assert(ping_pong_get_state(g_pp) == PING_PONG_STATE_RX_WAIT);
+
+    printf("  PASS: test_slave_ignores_master_fields\n");
+}
+
 /* ==================== 主函数 ==================== */
 
 int main(void)
@@ -1019,6 +1068,10 @@ int main(void)
     test_16bit_seq();
     test_slave_crc_error();
 
-    printf("\n=== ALL %d TESTS PASSED ===\n", 36);
+    printf("\n[Validation Tests]\n");
+    test_master_upper_bound_config();
+    test_slave_ignores_master_fields();
+
+    printf("\n=== ALL %d TESTS PASSED ===\n", 38);
     return 0;
 }

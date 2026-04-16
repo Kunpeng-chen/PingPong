@@ -108,7 +108,7 @@ stateDiagram-v2
 
 | 函数 | 说明 |
 |------|------|
-| `instance_size` | 获取实例所需内存大小 |
+| `instance_size` | 获取实例所需内存大小（无参数，TX 缓冲区由编译时 `PING_PONG_TX_BUFFER_SIZE` 决定） |
 | `init` | 初始化，注入端口 |
 | `set_config` | 设置配置（必须在 start 前调用） |
 | `start` | 以指定角色启动 |
@@ -124,13 +124,26 @@ stateDiagram-v2
 
 ## 8. 配置参数
 
+`ping_pong_init()` 时自动填充默认值，可通过 `ping_pong_set_config()` 在 `start` 前覆盖。
+
+**运行时配置（`ping_pong_config_t`）：**
+
 | 参数 | 说明 |
 |------|------|
-| `timeout_ms` | Master 等待回复超时时间 |
-| `max_retries` | Master 最大重传次数 |
-| `tx_buffer_size` | 发送缓冲区大小 |
-| `slave_rx_timeout_ms` | Slave 等待超时（0 表示永不超时） |
-| `tx_timeout_ms` | TX 状态超时保护（0 表示不检测） |
+| `max_retries` | Master 最大重传次数（Slave 忽略） |
+| `rx_timeout_ms` | 等待 Ping/Pong 超时（Master 必须>0，Slave 0=永不超时） |
+| `tx_timeout_ms` | TX 状态超时保护（0 表示不检测，Master/Slave 通用） |
+
+**编译时常量（可通过 `-D` 覆盖）：**
+
+| 宏 | 默认值 | 说明 |
+|----|--------|------|
+| `PING_PONG_TX_BUFFER_SIZE` | `PING_PONG_MIN_PACKET_SIZE` (6) | 发送缓冲区大小 |
+| `PING_PONG_DEFAULT_MAX_RETRIES` | 3 | 默认最大重传次数 |
+| `PING_PONG_DEFAULT_RX_TIMEOUT_MS` | 3000 | 默认接收等待超时（毫秒） |
+| `PING_PONG_DEFAULT_TX_TIMEOUT_MS` | 3000 | 默认 TX 状态超时保护（毫秒） |
+| `PING_PONG_MAX_TIMEOUT_MS` | 600000 | 超时上界（10 分钟） |
+| `PING_PONG_MAX_RETRIES` | 255 | 重试次数上界 |
 
 ## 9. 统计信息
 
@@ -164,7 +177,6 @@ stateDiagram-v2
 | `PING_PONG_ERR_NOT_INITIALIZED` | -2 | 实例未初始化 |
 | `PING_PONG_ERR_INVALID_STATE` | -3 | 当前状态不允许此操作 |
 | `PING_PONG_ERR_INVALID_PARAM` | -4 | 参数无效 |
-| `PING_PONG_ERR_NOT_CONFIGURED` | -5 | 未设置配置 |
 
 | 场景 | 处理方式 |
 |------|---------|

@@ -15,12 +15,11 @@
 
 #define MASTER_TIMEOUT_MS      3000
 #define MASTER_MAX_RETRIES        3
-#define MASTER_TX_BUFFER_SIZE     PING_PONG_MIN_PACKET_SIZE
 
 /* ==================== 实例内存 ==================== */
 
 /* 内存大小 = 内部结构体（≤ 256 字节）+ 发送缓冲区 */
-static uint8_t g_master_mem[256 + MASTER_TX_BUFFER_SIZE];
+static uint8_t g_master_mem[256 + PING_PONG_TX_BUFFER_SIZE];
 #define g_master ((ping_pong_t *)g_master_mem)
 
 /* 延迟重启标志：SUCCESS/FAIL 回调中置位，主循环中处理，避免重入 */
@@ -136,12 +135,12 @@ void master_init(void)
         .user_data   = NULL,
         .trace       = NULL,
     };
+    /* 默认配置已在 init 中填充（rx_timeout_ms=3000, max_retries=3, tx_timeout_ms=3000），
+     * 此处覆盖为项目专属值。 */
     ping_pong_config_t config = {
-        .timeout_ms          = MASTER_TIMEOUT_MS,
-        .max_retries         = MASTER_MAX_RETRIES,
-        .tx_buffer_size      = MASTER_TX_BUFFER_SIZE,
-        .slave_rx_timeout_ms = 0,
-        .tx_timeout_ms       = 0,
+        .max_retries   = MASTER_MAX_RETRIES,
+        .rx_timeout_ms = MASTER_TIMEOUT_MS,
+        .tx_timeout_ms = 0,
     };
 
     ping_pong_init(g_master, &port);

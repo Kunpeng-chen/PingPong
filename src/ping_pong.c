@@ -285,7 +285,7 @@ static void send_tx_request(ping_pong_t *pp)
     tx_notify.timestamp_ms = pp->tx_start_time;
     tx_notify.seq = pp->current_seq;
     tx_notify.payload.tx_request.tx_buffer = PP_TX_BUFFER(pp);
-    tx_notify.payload.tx_request.tx_buffer_size = pp->config.tx_buffer_size;
+    tx_notify.payload.tx_request.tx_buffer_size = PING_PONG_TX_BUFFER_SIZE;
 
     pp->stats.tx_count++;
 
@@ -306,6 +306,11 @@ ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port)
     pp->role = PING_PONG_ROLE_NONE;
     pp->port = *port;
     
+    /* 填充默认配置，可通过 set_config 覆盖 */
+    pp->config.max_retries   = PING_PONG_DEFAULT_MAX_RETRIES;
+    pp->config.rx_timeout_ms = PING_PONG_DEFAULT_RX_TIMEOUT_MS;
+    pp->config.tx_timeout_ms = PING_PONG_DEFAULT_TX_TIMEOUT_MS;
+    
     PP_TRACE(pp, "init: ok");
     return PING_PONG_OK;
 }
@@ -324,11 +329,6 @@ ping_pong_err_t ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *
         return PING_PONG_ERR_INVALID_STATE;
     }
     
-    if (config->timeout_ms == 0 || config->max_retries == 0 ||
-        config->tx_buffer_size < PING_PONG_MIN_PACKET_SIZE) {
-        return PING_PONG_ERR_INVALID_PARAM;
-    }
-    
     pp->config = *config;
     
     return PING_PONG_OK;
@@ -345,13 +345,21 @@ ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
     if (pp->magic != PING_PONG_MAGIC) {
         return PING_PONG_ERR_NOT_INITIALIZED;
     }
-    
-    if (pp->config.tx_buffer_size == 0) {
-        return PING_PONG_ERR_NOT_CONFIGURED;
-    }
 
     if (role != PING_PONG_ROLE_MASTER && role != PING_PONG_ROLE_SLAVE) {
         return PING_PONG_ERR_INVALID_PARAM;
+    }
+
+    /* 按角色校验配置参数 */
+    if (role == PING_PONG_ROLE_MASTER) {
+        if (pp->config.rx_timeout_ms == 0 ||
+            pp->config.rx_timeout_ms > PING_PONG_MAX_TIMEOUT_MS) {
+            return PING_PONG_ERR_INVALID_PARAM;
+        }
+        if (pp->config.max_retries == 0 ||
+            pp->config.max_retries > PING_PONG_MAX_RETRIES) {
+            return PING_PONG_ERR_INVALID_PARAM;
+        }
     }
 
     pp_event_t evt = (role == PING_PONG_ROLE_MASTER) ? EVT_START_MASTER : EVT_START_SLAVE;
@@ -460,7 +468,7 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
     uint32_t timeout_ms;
     
     if (pp->role == PING_PONG_ROLE_MASTER) {
-        timeout_ms = pp->config.timeout_ms;
+        timeout_ms = pp->config.rx_timeout_ms;
         if ((now_ms - pp->tx_start_time) >= timeout_ms) {
             if (pp->current_retry < pp->config.max_retries) {
                 pp->current_retry++;
@@ -470,10 +478,10 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
             }
         }
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
-        if (pp->config.slave_rx_timeout_ms == 0) {
+        if (pp->config.rx_timeout_ms == 0) {
             return PING_PONG_OK;
         }
-        timeout_ms = pp->config.slave_rx_timeout_ms;
+        timeout_ms = pp->config.rx_timeout_ms;
         if ((now_ms - pp->rx_start_time) >= timeout_ms) {
             ping_pong_notify_t notify;
             pp_memset(&notify, 0, sizeof(notify));
@@ -605,11 +613,15 @@ int ping_pong_is_valid(const ping_pong_t *pp)
     return (pp != NULL && pp->magic == PING_PONG_MAGIC) ? 1 : 0;
 }
 
-uint32_t ping_pong_instance_size(uint32_t tx_buffer_size)
+uint32_t ping_pong_instance_size(void)
 {
-    return (uint32_t)(sizeof(struct ping_pong) + tx_buffer_size);
+    return (uint32_t)(sizeof(struct ping_pong) + PING_PONG_TX_BUFFER_SIZE);
 }
 
 /* Compile-time check that context fits within 256 bytes */
 _Static_assert(sizeof(struct ping_pong) <= 256,
                "struct ping_pong exceeds 256-byte limit");
+
+/* Compile-time check that TX buffer size is sufficient */
+_Static_assert(PING_PONG_TX_BUFFER_SIZE >= PING_PONG_MIN_PACKET_SIZE,
+               "PING_PONG_TX_BUFFER_SIZE must be >= PING_PONG_MIN_PACKET_SIZE");

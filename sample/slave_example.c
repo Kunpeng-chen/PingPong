@@ -13,7 +13,6 @@
 
 /* ==================== 配置 ==================== */
 
-#define SLAVE_TX_BUFFER_SIZE  PING_PONG_MIN_PACKET_SIZE
 /*
  * SLAVE_RX_TIMEOUT_MS = 0  永不超时，持续监听
  * 非零值：超时后触发 PING_PONG_NOTIFY_RX_TIMEOUT，模块自动重进监听
@@ -22,7 +21,7 @@
 
 /* ==================== 实例内存 ==================== */
 
-static uint8_t g_slave_mem[256 + SLAVE_TX_BUFFER_SIZE];
+static uint8_t g_slave_mem[256 + PING_PONG_TX_BUFFER_SIZE];
 #define g_slave ((ping_pong_t *)g_slave_mem)
 
 /* ==================== 平台适配 [需实现] ==================== */
@@ -131,15 +130,13 @@ void slave_init(void)
         .trace       = NULL,
     };
     /*
-     * timeout_ms / max_retries 为 Slave 不使用的字段，填写合法最小值即可。
-     * tx_buffer_size 须 >= PING_PONG_MIN_PACKET_SIZE。
+     * Slave 无需设置 max_retries（仅 Master 使用）。
+     * rx_timeout_ms=0 表示永不超时，持续监听。
      */
     ping_pong_config_t config = {
-        .timeout_ms          = 1,
-        .max_retries         = 1,
-        .tx_buffer_size      = SLAVE_TX_BUFFER_SIZE,
-        .slave_rx_timeout_ms = SLAVE_RX_TIMEOUT_MS,
-        .tx_timeout_ms       = 0,
+        .max_retries   = 0,
+        .rx_timeout_ms = SLAVE_RX_TIMEOUT_MS,
+        .tx_timeout_ms = 0,
     };
 
     ping_pong_init(g_slave, &port);

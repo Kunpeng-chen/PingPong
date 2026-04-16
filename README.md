@@ -48,9 +48,9 @@ PingPong 模块外部负责：
 ## 快速接入
 
 1. 在上层提供 `get_time_ms` 与 `notify` 两个端口函数。
-2. 为 `ping_pong_t` 上下文和发送缓冲区预留连续内存。
-3. 调用 `ping_pong_init()` 初始化实例。
-4. 调用 `ping_pong_set_config()` 设置超时、重试次数和缓冲区大小。
+2. 调用 `ping_pong_instance_size()` 获取所需内存大小，预留连续内存。
+3. 调用 `ping_pong_init()` 初始化实例（自动填充默认配置）。
+4. 按需调用 `ping_pong_set_config()` 覆盖默认的超时和重试参数。
 5. 通过 `ping_pong_start()` 以 `MASTER` 或 `SLAVE` 角色启动。
 6. 在主循环中持续调用 `ping_pong_process()` 检查超时。
 7. 在底层驱动完成发送或接收后，分别回调 `ping_pong_on_tx_done()`、`ping_pong_on_rx_done()`。
@@ -66,7 +66,7 @@ PingPong 模块外部负责：
 
 ## 核心接口
 
-- 内存计算：`ping_pong_instance_size`
+- 内存计算：`ping_pong_instance_size`（无参数，TX 缓冲区大小由编译时 `PING_PONG_TX_BUFFER_SIZE` 决定）
 - 生命周期：`ping_pong_init` `ping_pong_set_config` `ping_pong_start` `ping_pong_stop` `ping_pong_reset`
 - 轮询与事件：`ping_pong_process` `ping_pong_on_tx_done` `ping_pong_on_rx_done`
 - 状态查询：`ping_pong_get_state` `ping_pong_get_role` `ping_pong_get_stats` `ping_pong_is_valid`
