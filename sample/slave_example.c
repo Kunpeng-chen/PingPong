@@ -9,13 +9,43 @@
  *  5. 无线接收完成后（中断或回调）调用 slave_on_radio_rx_done()
  */
 
+/*============================ INCLUDES ======================================*/
+
 #include "ping_pong.h"
+
+/*============================ MACROS ========================================*/
 
 /* SLAVE_RX_TIMEOUT_MS = 0 表示永不超时，持续监听。 */
 #define SLAVE_RX_TIMEOUT_MS   0
 
-static uint8_t g_slave_mem[256 + PING_PONG_TX_BUFFER_SIZE];
+/*============================ MACROFIED FUNCTIONS ===========================*/
+
 #define g_slave ((ping_pong_t *)g_slave_mem)
+
+/*============================ TYPES =========================================*/
+
+/* None. */
+
+/*============================ GLOBAL VARIABLES ==============================*/
+
+/* None. */
+
+/*============================ LOCAL VARIABLES ===============================*/
+
+static uint8_t g_slave_mem[256 + PING_PONG_TX_BUFFER_SIZE];
+
+/*============================ PROTOTYPES ====================================*/
+
+static uint32_t platform_get_time_ms(void);
+static void radio_start_tx(const uint8_t *data, uint32_t len);
+static void radio_start_rx(void);
+static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *n,
+                         void *user_data);
+void slave_init(void);
+void slave_process(void);
+void slave_on_radio_tx_done(void);
+void slave_on_radio_rx_done(const uint8_t *data, uint32_t len,
+                            int16_t rssi, int16_t snr);
 
 static uint32_t platform_get_time_ms(void)
 {
