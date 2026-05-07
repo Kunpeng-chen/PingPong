@@ -48,6 +48,8 @@ void master_on_radio_tx_done(void);
 void master_on_radio_rx_done(const uint8_t *data, uint32_t len,
                              int16_t rssi, int16_t snr);
 
+/*============================ IMPLEMENTATION ================================*/
+
 static uint32_t platform_get_time_ms(void)
 {
     /* TODO: 替换为平台 SysTick 或 RTC 计数 */
