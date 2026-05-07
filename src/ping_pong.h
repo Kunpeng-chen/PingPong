@@ -12,6 +12,8 @@
 #ifndef PING_PONG_H
 #define PING_PONG_H
 
+/*============================ INCLUDES ======================================*/
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -19,36 +21,7 @@
 extern "C" {
 #endif
 
-/* ==================== 枚举定义 ==================== */
-
-typedef enum {
-    PING_PONG_OK                  =  0,
-    PING_PONG_ERR_NULL_PTR        = -1,
-    PING_PONG_ERR_NOT_INITIALIZED = -2,
-    PING_PONG_ERR_INVALID_STATE   = -3,
-    PING_PONG_ERR_INVALID_PARAM   = -4,
-} ping_pong_err_t;
-
-typedef enum {
-    PING_PONG_STATE_IDLE,
-    PING_PONG_STATE_TX,
-    PING_PONG_STATE_RX_WAIT,
-    PING_PONG_STATE_STOPPED,
-} ping_pong_state_t;
-
-typedef enum {
-    PING_PONG_ROLE_NONE,
-    PING_PONG_ROLE_MASTER,
-    PING_PONG_ROLE_SLAVE,
-} ping_pong_role_t;
-
-typedef enum {
-    PING_PONG_NOTIFY_TX_REQUEST,
-    PING_PONG_NOTIFY_RX_REQUEST,
-    PING_PONG_NOTIFY_SUCCESS,
-    PING_PONG_NOTIFY_FAIL,
-    PING_PONG_NOTIFY_RX_TIMEOUT,
-} ping_pong_notify_type_t;
+/*============================ MACROS ========================================*/
 
 #define PING_PONG_FAIL_REASON_RX_TIMEOUT   1
 #define PING_PONG_FAIL_REASON_MAX_RETRIES  2
@@ -80,6 +53,41 @@ typedef enum {
 #ifndef PING_PONG_DEFAULT_TX_TIMEOUT_MS
 #define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000
 #endif
+
+/*============================ MACROFIED FUNCTIONS ===========================*/
+
+/* None. */
+
+/*============================ TYPES =========================================*/
+
+typedef enum {
+    PING_PONG_OK                  =  0,
+    PING_PONG_ERR_NULL_PTR        = -1,
+    PING_PONG_ERR_NOT_INITIALIZED = -2,
+    PING_PONG_ERR_INVALID_STATE   = -3,
+    PING_PONG_ERR_INVALID_PARAM   = -4,
+} ping_pong_err_t;
+
+typedef enum {
+    PING_PONG_STATE_IDLE,
+    PING_PONG_STATE_TX,
+    PING_PONG_STATE_RX_WAIT,
+    PING_PONG_STATE_STOPPED,
+} ping_pong_state_t;
+
+typedef enum {
+    PING_PONG_ROLE_NONE,
+    PING_PONG_ROLE_MASTER,
+    PING_PONG_ROLE_SLAVE,
+} ping_pong_role_t;
+
+typedef enum {
+    PING_PONG_NOTIFY_TX_REQUEST,
+    PING_PONG_NOTIFY_RX_REQUEST,
+    PING_PONG_NOTIFY_SUCCESS,
+    PING_PONG_NOTIFY_FAIL,
+    PING_PONG_NOTIFY_RX_TIMEOUT,
+} ping_pong_notify_type_t;
 
 typedef struct {
     uint32_t max_retries;
@@ -133,6 +141,16 @@ typedef struct {
     void *user_data;
     void (*trace)(const char *msg);
 } ping_pong_port_t;
+
+/*============================ GLOBAL VARIABLES ==============================*/
+
+/* None. */
+
+/*============================ LOCAL VARIABLES ===============================*/
+
+/* None. */
+
+/*============================ PROTOTYPES ====================================*/
 
 uint32_t ping_pong_instance_size(void);
 ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port);
