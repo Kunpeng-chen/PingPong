@@ -2,20 +2,30 @@
  * PingPong 中间件实现 - 主从一体版
  */
 
+/*============================ INCLUDES ======================================*/
+
 #include "ping_pong.h"
 
-static inline void pp_memset(void *dst, int val, uint32_t len)
-{
-    uint8_t *p = (uint8_t *)dst;
-    uint32_t i;
-    for (i = 0; i < len; i++) {
-        p[i] = (uint8_t)val;
-    }
-}
+/*============================ MACROS ========================================*/
 
 #define PING_PONG_MAGIC 0x50494E47
 #define PACKET_TYPE_PING  0x01
 #define PACKET_TYPE_PONG  0x02
+#define PING_PONG_CRC_SIZE 2
+#define PP_MIN_PACKET_SIZE (sizeof(ping_pong_header_t) + PING_PONG_CRC_SIZE)
+#define PARSE_OK          0
+#define PARSE_ERR_FORMAT (-1)
+#define PARSE_ERR_CRC    (-2)
+
+/*============================ MACROFIED FUNCTIONS ===========================*/
+
+#define PP_TX_BUFFER(pp) ((uint8_t *)(pp) + sizeof(struct ping_pong))
+
+#define PP_TRACE(pp, msg) do { \
+    if ((pp)->port.trace) { (pp)->port.trace(msg); } \
+} while (0)
+
+/*============================ TYPES =========================================*/
 
 typedef struct {
     uint8_t type;
@@ -23,18 +33,6 @@ typedef struct {
     uint8_t seq_lo;
     uint8_t reserved;
 } ping_pong_header_t;
-
-#define PING_PONG_CRC_SIZE 2
-#define PP_MIN_PACKET_SIZE (sizeof(ping_pong_header_t) + PING_PONG_CRC_SIZE)
-
-#define PARSE_OK          0
-#define PARSE_ERR_FORMAT (-1)
-#define PARSE_ERR_CRC    (-2)
-
-static inline uint16_t get_u16_be(const uint8_t *buf)
-{
-    return ((uint16_t)buf[0] << 8) | buf[1];
-}
 
 typedef enum {
     EVT_START_MASTER,
@@ -44,6 +42,25 @@ typedef enum {
     EVT_RX_DONE,
     EVT_COUNT
 } pp_event_t;
+
+struct ping_pong {
+    uint32_t magic;
+    ping_pong_state_t state;
+    ping_pong_role_t role;
+    ping_pong_config_t config;
+    ping_pong_port_t port;
+    uint16_t current_seq;
+    uint16_t current_retry;
+    uint32_t tx_start_time;
+    uint32_t rx_start_time;
+    ping_pong_stats_t stats;
+};
+
+/*============================ GLOBAL VARIABLES ==============================*/
+
+/* None. */
+
+/*============================ LOCAL VARIABLES ===============================*/
 
 static const uint8_t valid_transitions[4][EVT_COUNT] = {
     [PING_PONG_STATE_IDLE] = {
@@ -64,29 +81,11 @@ static const uint8_t valid_transitions[4][EVT_COUNT] = {
     },
 };
 
-static int is_valid_transition(ping_pong_state_t state, pp_event_t event)
-{
-    if ((unsigned)state >= 4 || (unsigned)event >= EVT_COUNT) {
-        return 0;
-    }
-    return valid_transitions[state][event];
-}
+/*============================ PROTOTYPES ====================================*/
 
-struct ping_pong {
-    uint32_t magic;
-    ping_pong_state_t state;
-    ping_pong_role_t role;
-    ping_pong_config_t config;
-    ping_pong_port_t port;
-    uint16_t current_seq;
-    uint16_t current_retry;
-    uint32_t tx_start_time;
-    uint32_t rx_start_time;
-    ping_pong_stats_t stats;
-};
-
-#define PP_TX_BUFFER(pp) ((uint8_t *)(pp) + sizeof(struct ping_pong))
-
+static inline void pp_memset(void *dst, int val, uint32_t len);
+static inline uint16_t get_u16_be(const uint8_t *buf);
+static int is_valid_transition(ping_pong_state_t state, pp_event_t event);
 static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify);
 static uint16_t compute_crc16(const uint8_t *data, uint32_t len);
 static ping_pong_err_t build_packet(uint8_t *buf, uint32_t buf_size, uint8_t type, uint16_t seq);
@@ -101,9 +100,27 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void send_tx_request(ping_pong_t *pp);
 
-#define PP_TRACE(pp, msg) do { \
-    if ((pp)->port.trace) { (pp)->port.trace(msg); } \
-} while (0)
+static inline void pp_memset(void *dst, int val, uint32_t len)
+{
+    uint8_t *p = (uint8_t *)dst;
+    uint32_t i;
+    for (i = 0; i < len; i++) {
+        p[i] = (uint8_t)val;
+    }
+}
+
+static inline uint16_t get_u16_be(const uint8_t *buf)
+{
+    return ((uint16_t)buf[0] << 8) | buf[1];
+}
+
+static int is_valid_transition(ping_pong_state_t state, pp_event_t event)
+{
+    if ((unsigned)state >= 4 || (unsigned)event >= EVT_COUNT) {
+        return 0;
+    }
+    return valid_transitions[state][event];
+}
 
 static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify)
 {
