@@ -86,10 +86,6 @@ static void slave_notify(ping_pong_t *pp, const ping_pong_notify_t *n,
         radio_start_rx();
         break;
 
-    case PING_PONG_NOTIFY_RX_TIMEOUT:
-        /* 模块会自动重进 RX_WAIT 并再次发出 RX_REQUEST。 */
-        break;
-
     default:
         break;
     }
