@@ -108,7 +108,6 @@ typedef enum {
     PING_PONG_NOTIFY_RX_REQUEST, /**< Start radio RX mode. */
     PING_PONG_NOTIFY_SUCCESS,    /**< Master completed one Ping-Pong round. */
     PING_PONG_NOTIFY_FAIL,       /**< Master failed the current Ping-Pong round. */
-    PING_PONG_NOTIFY_RX_TIMEOUT, /**< Slave RX timeout; the core re-enters RX wait. */
 } ping_pong_notify_type_t;
 
 /** @brief Runtime configuration. Defaults are populated by ping_pong_init(). */
