@@ -170,6 +170,10 @@ int ping_pong_is_valid(const ping_pong_t *pp);
 ping_pong_err_t ping_pong_build_ping(uint8_t *buf, uint32_t buf_size, uint16_t seq);
 ping_pong_err_t ping_pong_build_pong(uint8_t *buf, uint32_t buf_size, uint16_t seq);
 
+/*============================ IMPLEMENTATION ================================*/
+
+/* None. */
+
 #ifdef __cplusplus
 }
 #endif
