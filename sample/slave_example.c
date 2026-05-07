@@ -20,7 +20,7 @@
 
 /*============================ MACROFIED FUNCTIONS ===========================*/
 
-#define g_slave ((ping_pong_t *)g_slave_mem)
+PING_PONG_DEFINE_INSTANCE(g_slave);
 
 /*============================ TYPES =========================================*/
 
@@ -32,7 +32,7 @@
 
 /*============================ LOCAL VARIABLES ===============================*/
 
-static uint8_t g_slave_mem[256 + PING_PONG_TX_BUFFER_SIZE];
+/* None. */
 
 /*============================ PROTOTYPES ====================================*/
 
