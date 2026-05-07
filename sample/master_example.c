@@ -20,7 +20,7 @@
 
 /*============================ MACROFIED FUNCTIONS ===========================*/
 
-#define g_master ((ping_pong_t *)g_master_mem)
+PING_PONG_DEFINE_INSTANCE(g_master);
 
 /*============================ TYPES =========================================*/
 
@@ -32,7 +32,6 @@
 
 /*============================ LOCAL VARIABLES ===============================*/
 
-static uint8_t g_master_mem[256 + PING_PONG_TX_BUFFER_SIZE];
 static volatile int g_restart_pending;
 
 /*============================ PROTOTYPES ====================================*/
