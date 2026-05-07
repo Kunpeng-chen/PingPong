@@ -90,7 +90,8 @@ ping_pong_init(g_master, &port);
 | `PING_PONG_NOTIFY_RX_REQUEST` | 请求上层进入接收模式 |
 | `PING_PONG_NOTIFY_SUCCESS` | 本轮协议成功 |
 | `PING_PONG_NOTIFY_FAIL` | 本轮失败，`fail_reason` 说明原因 |
-| `PING_PONG_NOTIFY_RX_TIMEOUT` | 仅 `SLAVE` 可能收到的接收超时通知 |
+
+Slave RX 超时由核心内部处理：模块会累计 `rx_timeout_count` 并重新发出 `PING_PONG_NOTIFY_RX_REQUEST`，不会额外发送独立的 RX timeout 通知。
 
 `TX_REQUEST` 中有两个长度字段：
 
