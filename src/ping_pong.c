@@ -411,13 +411,7 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
         if (pp->config.rx_timeout_ms == 0) { return PING_PONG_OK; }
         if ((now_ms - pp->rx_start_time) >= pp->config.rx_timeout_ms) {
-            ping_pong_notify_t notify;
             pp->stats.rx_timeout_count++;
-            pp_memset(&notify, 0, sizeof(notify));
-            notify.type = PING_PONG_NOTIFY_RX_TIMEOUT;
-            notify.timestamp_ms = now_ms;
-            notify.seq = pp->current_seq;
-            send_notify(pp, &notify);
             enter_rx_wait(pp, now_ms);
         }
     }
