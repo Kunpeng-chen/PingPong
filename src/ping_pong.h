@@ -54,6 +54,24 @@ extern "C" {
 #define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000
 #endif
 
+/**
+ * @brief Define a static PingPong object instance and its backing memory.
+ *
+ * This macro is intended for embedded/static allocation use cases. It defines
+ * a byte buffer named `<name>_buffer` and a `ping_pong_t *` named `<name>`.
+ * The backing size matches the current internal 256-byte context limit plus
+ * the compile-time TX buffer size.
+ *
+ * Example:
+ * @code
+ * PING_PONG_DEFINE_INSTANCE(g_master);
+ * ping_pong_init(g_master, &port);
+ * @endcode
+ */
+#define PING_PONG_DEFINE_INSTANCE(name)                                      \
+    static uint8_t name##_buffer[256u + PING_PONG_TX_BUFFER_SIZE];           \
+    static ping_pong_t *name = (ping_pong_t *)name##_buffer
+
 /*============================ MACROFIED FUNCTIONS ===========================*/
 
 /* None. */
