@@ -100,6 +100,8 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void send_tx_request(ping_pong_t *pp);
 
+/*============================ IMPLEMENTATION ================================*/
+
 static inline void pp_memset(void *dst, int val, uint32_t len)
 {
     uint8_t *p = (uint8_t *)dst;
