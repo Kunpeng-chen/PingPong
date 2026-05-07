@@ -9,15 +9,44 @@
  *  5. 无线接收完成后（中断或回调）调用 master_on_radio_rx_done()
  */
 
+/*============================ INCLUDES ======================================*/
+
 #include "ping_pong.h"
+
+/*============================ MACROS ========================================*/
 
 #define MASTER_TIMEOUT_MS      3000
 #define MASTER_MAX_RETRIES        3
 
-static uint8_t g_master_mem[256 + PING_PONG_TX_BUFFER_SIZE];
+/*============================ MACROFIED FUNCTIONS ===========================*/
+
 #define g_master ((ping_pong_t *)g_master_mem)
 
+/*============================ TYPES =========================================*/
+
+/* None. */
+
+/*============================ GLOBAL VARIABLES ==============================*/
+
+/* None. */
+
+/*============================ LOCAL VARIABLES ===============================*/
+
+static uint8_t g_master_mem[256 + PING_PONG_TX_BUFFER_SIZE];
 static volatile int g_restart_pending;
+
+/*============================ PROTOTYPES ====================================*/
+
+static uint32_t platform_get_time_ms(void);
+static void radio_start_tx(const uint8_t *data, uint32_t len);
+static void radio_start_rx(void);
+static void master_notify(ping_pong_t *pp, const ping_pong_notify_t *n,
+                          void *user_data);
+void master_init(void);
+void master_process(void);
+void master_on_radio_tx_done(void);
+void master_on_radio_rx_done(const uint8_t *data, uint32_t len,
+                             int16_t rssi, int16_t snr);
 
 static uint32_t platform_get_time_ms(void)
 {
