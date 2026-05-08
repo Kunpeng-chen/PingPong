@@ -12,6 +12,8 @@
 #ifndef PING_PONG_H
 #define PING_PONG_H
 
+/*============================ INCLUDES ======================================*/
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -19,248 +21,272 @@
 extern "C" {
 #endif
 
-/* ==================== 枚举定义 ==================== */
+/*============================ MACROS ========================================*/
 
-/** @brief 错误码枚举 */
-typedef enum {
-    PING_PONG_OK                  =  0, /**< 成功 */
-    PING_PONG_ERR_NULL_PTR        = -1, /**< 空指针参数 */
-    PING_PONG_ERR_NOT_INITIALIZED = -2, /**< 实例未初始化（magic 不匹配） */
-    PING_PONG_ERR_INVALID_STATE   = -3, /**< 当前状态不允许此操作 */
-    PING_PONG_ERR_INVALID_PARAM   = -4, /**< 参数无效 */
-} ping_pong_err_t;
+#define PING_PONG_FAIL_REASON_RX_TIMEOUT   1
+#define PING_PONG_FAIL_REASON_MAX_RETRIES  2
+#define PING_PONG_FAIL_REASON_PARSE_ERROR  3
+#define PING_PONG_FAIL_REASON_CRC_ERROR    4
+#define PING_PONG_FAIL_REASON_TX_TIMEOUT   5
+#define PING_PONG_FAIL_REASON_CONFLICT     6
 
-/** @brief 协议状态（阶段，不携带角色信息） */
-typedef enum {
-    PING_PONG_STATE_IDLE,        /**< 空闲 */
-    PING_PONG_STATE_TX,          /**< 发送阶段 */
-    PING_PONG_STATE_RX_WAIT,     /**< 等待接收阶段 */
-    PING_PONG_STATE_STOPPED,     /**< 已停止 */
-} ping_pong_state_t;
-
-/** @brief 角色（与状态正交，启动时固定） */
-typedef enum {
-    PING_PONG_ROLE_NONE,         /**< 未确定角色 */
-    PING_PONG_ROLE_MASTER,       /**< 主设备（主动发送 Ping） */
-    PING_PONG_ROLE_SLAVE,        /**< 从设备（被动回复 Pong） */
-} ping_pong_role_t;
-
-/** @brief 通知类型 */
-typedef enum {
-    PING_PONG_NOTIFY_TX_REQUEST,    /**< 请求发送包（携带缓冲区） */
-    PING_PONG_NOTIFY_RX_REQUEST,    /**< 请求进入接收模式 */
-    PING_PONG_NOTIFY_SUCCESS,       /**< Ping-Pong 成功 */
-    PING_PONG_NOTIFY_FAIL,          /**< Ping-Pong 失败 */
-    PING_PONG_NOTIFY_RX_TIMEOUT,    /**< 接收超时（仅 Slave） */
-} ping_pong_notify_type_t;
-
-/* ==================== 常量定义 ==================== */
-
-/** @name 失败原因 */
-/** @{ */
-#define PING_PONG_FAIL_REASON_RX_TIMEOUT   1  /**< 接收超时 */
-#define PING_PONG_FAIL_REASON_MAX_RETRIES  2  /**< 超过最大重试次数 */
-#define PING_PONG_FAIL_REASON_PARSE_ERROR  3  /**< 包解析错误 */
-#define PING_PONG_FAIL_REASON_CRC_ERROR    4  /**< CRC 校验失败 */
-#define PING_PONG_FAIL_REASON_TX_TIMEOUT   5  /**< TX 超时 */
-#define PING_PONG_FAIL_REASON_CONFLICT    6  /**< 角色冲突 */
-/** @} */
-
-/** @brief 最小包长度（头部 4 字节 + CRC 2 字节） */
 #define PING_PONG_MIN_PACKET_SIZE  6
+#define PING_PONG_PACKET_SIZE      PING_PONG_MIN_PACKET_SIZE
 
-/** @name 配置上界（可在编译时覆盖） */
-/** @{ */
 #ifndef PING_PONG_MAX_TIMEOUT_MS
-#define PING_PONG_MAX_TIMEOUT_MS   600000  /**< 最大超时 10 分钟 */
+#define PING_PONG_MAX_TIMEOUT_MS   600000
 #endif
 #ifndef PING_PONG_MAX_RETRIES
-#define PING_PONG_MAX_RETRIES      255     /**< 最大重试次数 */
+#define PING_PONG_MAX_RETRIES      255
 #endif
-/** @} */
 
-/** @brief 发送缓冲区大小（编译时固定，可通过 -D 覆盖，必须 >= PING_PONG_MIN_PACKET_SIZE） */
 #ifndef PING_PONG_TX_BUFFER_SIZE
 #define PING_PONG_TX_BUFFER_SIZE   PING_PONG_MIN_PACKET_SIZE
 #endif
 
-/** @name 配置默认值（可在编译时通过 -D 覆盖） */
-/** @{ */
 #ifndef PING_PONG_DEFAULT_MAX_RETRIES
-#define PING_PONG_DEFAULT_MAX_RETRIES    3      /**< 默认最大重传次数 */
+#define PING_PONG_DEFAULT_MAX_RETRIES    3
 #endif
 #ifndef PING_PONG_DEFAULT_RX_TIMEOUT_MS
-#define PING_PONG_DEFAULT_RX_TIMEOUT_MS  3000   /**< 默认接收等待超时（毫秒） */
+#define PING_PONG_DEFAULT_RX_TIMEOUT_MS  3000
 #endif
 #ifndef PING_PONG_DEFAULT_TX_TIMEOUT_MS
-#define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000   /**< 默认 TX 状态超时保护（毫秒） */
+#define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000
 #endif
-/** @} */
 
-/* ==================== 结构体定义 ==================== */
+/**
+ * @brief Define a static PingPong object instance and its backing memory.
+ *
+ * This macro is intended for embedded/static allocation use cases. It defines
+ * a byte buffer named `<name>_buffer` and a `ping_pong_t *` named `<name>`.
+ * The backing size matches the current internal 256-byte context limit plus
+ * the compile-time TX buffer size.
+ *
+ * Example:
+ * @code
+ * PING_PONG_DEFINE_INSTANCE(g_master);
+ * ping_pong_init(g_master, &port);
+ * @endcode
+ */
+#define PING_PONG_DEFINE_INSTANCE(name)                                      \
+    static uint8_t name##_buffer[256u + PING_PONG_TX_BUFFER_SIZE];           \
+    static ping_pong_t *name = (ping_pong_t *)name##_buffer
 
-/** @brief 配置参数（init 时自动填充默认值，可通过 set_config 覆盖） */
+/*============================ MACROFIED FUNCTIONS ===========================*/
+
+/* None. */
+
+/*============================ TYPES =========================================*/
+
+/** @brief API return codes. */
+typedef enum {
+    PING_PONG_OK                  =  0, /**< Operation completed successfully. */
+    PING_PONG_ERR_NULL_PTR        = -1, /**< A required pointer parameter is NULL. */
+    PING_PONG_ERR_NOT_INITIALIZED = -2, /**< The instance magic is invalid. */
+    PING_PONG_ERR_INVALID_STATE   = -3, /**< The current state does not allow the operation. */
+    PING_PONG_ERR_INVALID_PARAM   = -4, /**< A parameter value is out of range or invalid. */
+} ping_pong_err_t;
+
+/** @brief Protocol state. Role information is stored separately. */
+typedef enum {
+    PING_PONG_STATE_IDLE,        /**< Initialized and idle. */
+    PING_PONG_STATE_TX,          /**< A packet is being transmitted. */
+    PING_PONG_STATE_RX_WAIT,     /**< Waiting for a packet. */
+    PING_PONG_STATE_STOPPED,     /**< Stopped explicitly by the caller. */
+} ping_pong_state_t;
+
+/** @brief Protocol role selected when the instance is started. */
+typedef enum {
+    PING_PONG_ROLE_NONE,         /**< No active role. */
+    PING_PONG_ROLE_MASTER,       /**< Master sends Ping and waits for Pong. */
+    PING_PONG_ROLE_SLAVE,        /**< Slave waits for Ping and replies with Pong. */
+} ping_pong_role_t;
+
+/** @brief Notification events emitted to the platform layer. */
+typedef enum {
+    PING_PONG_NOTIFY_TX_REQUEST, /**< Start radio TX with the provided buffer and tx_len. */
+    PING_PONG_NOTIFY_RX_REQUEST, /**< Start radio RX mode. */
+    PING_PONG_NOTIFY_SUCCESS,    /**< Master completed one Ping-Pong round. */
+    PING_PONG_NOTIFY_FAIL,       /**< Master failed the current Ping-Pong round. */
+} ping_pong_notify_type_t;
+
+/** @brief Runtime configuration. Defaults are populated by ping_pong_init(). */
 typedef struct {
-    uint32_t max_retries;              /**< 最大重传次数（仅 Master，Slave 忽略） */
-    uint32_t rx_timeout_ms;            /**< 等待 Ping/Pong 超时（Master 必须>0，Slave 0=永不超时） */
-    uint32_t tx_timeout_ms;            /**< TX 状态超时保护（0=不检测，Master/Slave 通用） */
+    uint32_t max_retries;   /**< Maximum retry count for MASTER. Ignored by SLAVE. */
+    uint32_t rx_timeout_ms; /**< RX timeout. MASTER requires >0; SLAVE uses 0 for endless listening. */
+    uint32_t tx_timeout_ms; /**< TX timeout protection. Set 0 to disable. */
 } ping_pong_config_t;
 
-/** @brief 统计信息（原始计数） */
+/** @brief Raw protocol statistics. */
 typedef struct {
-    uint32_t success_count;            /**< 成功次数（仅 Master） */
-    uint32_t fail_count;               /**< 失败次数（仅 Master） */
-    uint32_t retry_count;              /**< 重传次数（仅 Master） */
-    uint32_t tx_count;                 /**< 发送次数（Master=Ping, Slave=Pong） */
-    uint32_t rx_count;                 /**< 有效接收次数（Master=Pong, Slave=Ping） */
-    uint32_t conflict_count;           /**< 冲突次数 */
-    uint32_t last_rtt_ms;              /**< 最近一次 RTT（仅 Master） */
-    int16_t  last_rssi;                /**< 最近一次收包 RSSI */
-    int16_t  last_snr;                 /**< 最近一次收包 SNR */
+    uint32_t success_count;     /**< Successful rounds, MASTER only. */
+    uint32_t fail_count;        /**< Failed rounds, MASTER only. */
+    uint32_t retry_count;       /**< Retry count, MASTER only. */
+    uint32_t tx_count;          /**< Transmitted packet count. */
+    uint32_t rx_count;          /**< Valid received packet count. */
+    uint32_t conflict_count;    /**< Role conflict count. */
+    uint32_t crc_error_count;   /**< CRC validation error count. */
+    uint32_t parse_error_count; /**< Packet format, type, or sequence error count. */
+    uint32_t rx_timeout_count;  /**< RX timeout count. */
+    uint32_t tx_timeout_count;  /**< TX timeout count. */
+    uint32_t last_rtt_ms;       /**< Last measured RTT, MASTER only. */
+    int16_t  last_rssi;         /**< Last received RSSI. */
+    int16_t  last_snr;          /**< Last received SNR. */
 } ping_pong_stats_t;
 
-/** @brief 通知数据结构 */
+/** @brief Notification payload passed to ping_pong_port_t::notify. */
 typedef struct ping_pong_notify {
-    ping_pong_notify_type_t type;
-    uint32_t timestamp_ms;
-    uint32_t seq;
+    ping_pong_notify_type_t type; /**< Notification type. */
+    uint32_t timestamp_ms;        /**< Timestamp from get_time_ms(). */
+    uint32_t seq;                 /**< Current packet sequence. */
     union {
         struct {
-            uint32_t rtt_ms;
-            int16_t rssi;
-            int16_t snr;
+            uint32_t rtt_ms;      /**< Round-trip time in milliseconds. */
+            int16_t rssi;         /**< RSSI of the received Pong. */
+            int16_t snr;          /**< SNR of the received Pong. */
         } success;
         struct {
-            uint32_t fail_reason;
+            uint32_t fail_reason; /**< One of PING_PONG_FAIL_REASON_*. */
         } fail;
         struct {
-            uint8_t *tx_buffer;
-            uint32_t tx_buffer_size;
+            uint8_t *tx_buffer;      /**< Core-built packet buffer. */
+            uint32_t tx_buffer_size; /**< Buffer capacity only; do not use as TX length. */
+            uint32_t tx_len;         /**< Exact packet length to send. */
         } tx_request;
     } payload;
 } ping_pong_notify_t;
 
-/** @brief 不透明结构体声明 */
 typedef struct ping_pong ping_pong_t;
 
-/** @brief 端口（PingPong 对外部的唯一依赖） */
+/** @brief Platform port callbacks and user context. */
 typedef struct {
-    uint32_t (*get_time_ms)(void);    /**< 获取当前时间戳（毫秒），必须实现 */
-    
-    /** @brief 通知回调，由上层实现
-     *  @param pp      PingPong 实例指针
-     *  @param notify  通知数据
-     *  @param user_data 用户上下文指针 */
+    uint32_t (*get_time_ms)(void); /**< Required millisecond timestamp provider. */
     void (*notify)(struct ping_pong *pp, const ping_pong_notify_t *notify,
-                   void *user_data);
-
-    void *user_data;                  /**< 用户上下文指针，传入 notify 回调 */
-
-    /** @brief 可选 Debug Trace 钩子（NULL=不输出）
-     *  @param msg 跟踪消息字符串 */
-    void (*trace)(const char *msg);
+                   void *user_data); /**< Required notification callback. */
+    void *user_data;                 /**< User context passed back to notify(). */
+    void (*trace)(const char *msg);  /**< Optional debug trace hook. */
 } ping_pong_port_t;
 
-/* ==================== API 函数 ==================== */
+/*============================ GLOBAL VARIABLES ==============================*/
+
+/* None. */
+
+/*============================ LOCAL VARIABLES ===============================*/
+
+/* None. */
+
+/*============================ PROTOTYPES ====================================*/
 
 /**
- * @brief 获取实例所需内存大小
- * @return 实例总字节数（内部结构体 + PING_PONG_TX_BUFFER_SIZE）
+ * @brief Return the number of bytes required for a PingPong instance.
+ *
+ * Allocate at least this many bytes and cast the buffer to ping_pong_t * before
+ * calling ping_pong_init(). The size includes the opaque context and internal TX buffer.
  */
 uint32_t ping_pong_instance_size(void);
 
 /**
- * @brief 初始化 PingPong 实例
- * @param pp   指向预分配的内存（至少 ping_pong_instance_size() 字节）
- * @param port 端口配置，包含必需的时间和通知回调
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Initialize a PingPong instance and load default configuration values.
+ * @param pp Preallocated instance memory.
+ * @param port Platform callbacks; get_time_ms and notify are required.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port);
 
 /**
- * @brief 设置配置（必须在 start 前调用）
- * @param pp     PingPong 实例
- * @param config 配置参数
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Override runtime configuration while the instance is idle or stopped.
+ * @param pp PingPong instance.
+ * @param config New configuration values.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *config);
 
 /**
- * @brief 启动协议（角色固定）
- * @param pp   PingPong 实例
- * @param role 启动角色（MASTER 或 SLAVE）
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Start the protocol as MASTER or SLAVE.
+ * @param pp PingPong instance.
+ * @param role PING_PONG_ROLE_MASTER or PING_PONG_ROLE_SLAVE.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role);
 
 /**
- * @brief 停止协议
- * @param pp PingPong 实例
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Stop a running instance.
+ * @param pp PingPong instance.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_stop(ping_pong_t *pp);
 
 /**
- * @brief 重置实例（清空统计和运行参数，回到 IDLE）
- * @param pp PingPong 实例
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Reset runtime state and statistics back to IDLE.
+ * @param pp PingPong instance.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_reset(ping_pong_t *pp);
 
 /**
- * @brief 轮询处理（超时检测），应在主循环中周期调用
- * @param pp PingPong 实例
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Drive timeout handling. Call periodically from the main loop.
+ * @param pp PingPong instance.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_process(ping_pong_t *pp);
 
 /**
- * @brief 发送完成通知（由 HAL 层在无线发送完成后调用）
- * @param pp PingPong 实例
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Notify the core that the platform radio TX operation has completed.
+ * @param pp PingPong instance.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_on_tx_done(ping_pong_t *pp);
 
 /**
- * @brief 接收完成通知（由 HAL 层在收到无线数据后调用）
- * @param pp   PingPong 实例
- * @param data 接收数据缓冲区
- * @param len  数据长度
- * @param rssi 信号强度指示
- * @param snr  信噪比
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Notify the core that a platform radio RX operation has completed.
+ * @param pp PingPong instance.
+ * @param data Received bytes.
+ * @param len Received byte count.
+ * @param rssi Received signal strength.
+ * @param snr Signal-to-noise ratio.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len,
                                       int16_t rssi, int16_t snr);
 
-/**
- * @brief 获取当前状态
- * @param pp PingPong 实例
- * @return 当前状态枚举值
- */
+/** @brief Return the current protocol state, or IDLE for an invalid instance. */
 ping_pong_state_t ping_pong_get_state(const ping_pong_t *pp);
 
-/**
- * @brief 获取当前角色
- * @param pp PingPong 实例
- * @return 当前角色枚举值
- */
+/** @brief Return the current role, or NONE for an invalid instance. */
 ping_pong_role_t ping_pong_get_role(const ping_pong_t *pp);
 
 /**
- * @brief 获取统计信息
- * @param pp    PingPong 实例
- * @param stats 输出统计结构体
- * @return PING_PONG_OK 成功，或错误码
+ * @brief Copy current statistics.
+ * @param pp PingPong instance.
+ * @param stats Output statistics structure.
+ * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *stats);
 
-/**
- * @brief 检查实例是否有效（已正确初始化）
- * @param pp PingPong 实例
- * @return 1 有效，0 无效（NULL 或未初始化）
- */
+/** @brief Return 1 if the instance pointer looks initialized, otherwise 0. */
 int ping_pong_is_valid(const ping_pong_t *pp);
+
+/**
+ * @brief Build a fixed-size Ping packet.
+ * @param buf Output buffer.
+ * @param buf_size Output buffer capacity. Must be at least PING_PONG_PACKET_SIZE.
+ * @param seq 16-bit sequence number.
+ * @return PING_PONG_OK or an error code.
+ */
+ping_pong_err_t ping_pong_build_ping(uint8_t *buf, uint32_t buf_size, uint16_t seq);
+
+/**
+ * @brief Build a fixed-size Pong packet.
+ * @param buf Output buffer.
+ * @param buf_size Output buffer capacity. Must be at least PING_PONG_PACKET_SIZE.
+ * @param seq 16-bit sequence number.
+ * @return PING_PONG_OK or an error code.
+ */
+ping_pong_err_t ping_pong_build_pong(uint8_t *buf, uint32_t buf_size, uint16_t seq);
+
+/*============================ IMPLEMENTATION ================================*/
+
+/* None. */
 
 #ifdef __cplusplus
 }
