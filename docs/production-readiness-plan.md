@@ -21,9 +21,12 @@
 1. 当前业务场景是一主一从，但仍需要引入设备地址和 `network_id`。
 2. `src_id` / `dst_id` 使用 8-bit 字段。
 3. `network_id` 使用 8-bit 字段。
-4. v2 包长可以接受增加到约 23 字节。
-5. Master 收到 CRC 错误、seq 不匹配、未知 type 等坏包时，应统计并继续等待，直到 RX timeout 再触发重试或失败。
-6. 正式生产目标需要认证与防重放能力，不能只依赖 CRC。
+4. v2 包长可以接受 24 字节。
+5. MAC 使用 64-bit 截断认证码。
+6. v2 不兼容旧 6 字节 v1 包格式。
+7. Phase 1 完成后，先基于当时稳定版本创建 Git tag `v0.1.0`，再开始 Phase 2 及后续破坏性协议升级。
+8. Master 收到 CRC 错误、seq 不匹配、未知 type 等坏包时，应统计并继续等待，直到 RX timeout 再触发重试或失败。
+9. 正式生产目标需要认证与防重放能力，不能只依赖 CRC。
 
 这些决策意味着 PingPong 将从“最小链路探测协议”升级为“可生产部署的单主单从安全心跳 / 链路健康协议”。
 
@@ -79,7 +82,7 @@
 
 ### 4.3 认证与防重放
 
-- 包内包含认证字段，例如截断 MAC
+- 包内包含 64-bit 截断 MAC
 - 认证输入至少包含 version、type、flags、seq、network_id、src_id、dst_id、counter / nonce
 - 包内包含 rolling counter 或 nonce
 - 重复 counter / 旧 counter 包应被拒绝并统计
@@ -116,7 +119,7 @@
 
 ## Phase 1：恢复测试体系与 CI 稳定性
 
-目标：让工程质量基线稳定下来。
+目标：让工程质量基线稳定下来，并在破坏性协议升级前沉淀一个稳定基线版本。
 
 任务：
 
@@ -125,12 +128,14 @@
 3. 保留 `test_ping_pong_extensions` 作为新增行为专项测试。
 4. 确认 gcc / clang / coverage 全部通过。
 5. 清理 PR 描述或文档中关于旧测试临时排除的说明。
+6. 基于 Phase 1 完成后的 `main` 创建 tag `v0.1.0`。
 
 验收标准：
 
 - `ctest --output-on-failure` 全部通过
 - coverage >= 90%
 - 无临时排除测试目标
+- `v0.1.0` tag 已创建并推送
 
 建议优先级：最高。
 
@@ -188,7 +193,7 @@ fail_on_auth_error = false
 
 目标：即使当前只是一主一从，也通过身份字段避免误响应、串包和跨网络干扰。
 
-建议包格式从当前 6 字节扩展为版本化格式。
+v2 不兼容旧 6 字节 v1 包格式。旧格式在 `v0.1.0` 中冻结；v2 之后统一使用版本化生产包格式。
 
 建议生产 v2 包格式：
 
@@ -200,11 +205,11 @@ mac_7 | mac_6 | mac_5 | mac_4 | mac_3 | mac_2 | mac_1 | mac_0 |
 crc_hi | crc_lo
 ```
 
-当前 v2 包长为 24 字节。如果 MAC 采用 32-bit 截断，则包长为 20 字节；如果采用 64-bit 截断，则包长为 24 字节。你已确认 v2 包长可以接受约 23 字节，因此 24 字节方案需要进一步确认，或改用 32-bit MAC 控制到 20 字节。
+当前 v2 包长为 24 字节，已确认可接受。
 
 字段建议：
 
-- `magic`：协议识别，建议 2 字节
+- `magic`：协议识别，2 字节
 - `version`：协议版本，当前 v2
 - `type`：PING / PONG
 - `flags`：广播、确认、保留扩展位
@@ -213,7 +218,7 @@ crc_hi | crc_lo
 - `src_id`：8-bit 发送方设备 ID
 - `dst_id`：8-bit 目标设备 ID
 - `counter`：32-bit rolling counter，用于防重放
-- `mac`：32-bit 或 64-bit 截断认证码
+- `mac`：64-bit 截断认证码
 - `crc`：CRC-16/CCITT，用于误码检测
 
 API 建议：
@@ -277,8 +282,8 @@ magic, version, type, flags, seq, network_id, src_id, dst_id, counter
 
 MAC 算法选择建议：
 
-1. 首选：SipHash-2-4 截断 32-bit 或 64-bit
-2. 可选：AES-CMAC 截断，适合已有 AES 硬件的 MCU
+1. 首选：SipHash-2-4 截断 64-bit
+2. 可选：AES-CMAC 截断 64-bit，适合已有 AES 硬件的 MCU
 3. 不建议：自定义 hash 或只用 CRC
 
 防重放策略：
@@ -388,6 +393,7 @@ uint32_t last_fail_timestamp_ms;
 - 迁移旧测试
 - 恢复完整 CMake 测试目标
 - coverage >= 90%
+- 创建并推送 tag `v0.1.0`
 
 ### M2：无线鲁棒性增强
 
@@ -399,13 +405,14 @@ uint32_t last_fail_timestamp_ms;
 
 - 增加 `network_id` / `src_id` / `dst_id`
 - 引入 versioned packet
+- 明确不兼容 v1
 - 地址过滤测试完成
 - 示例更新
 
 ### M4：安全与防重放
 
 - 增加 counter
-- 增加 MAC
+- 增加 64-bit MAC
 - 增加认证失败和重放统计
 - 完成伪造 / 重放测试
 
@@ -423,22 +430,20 @@ uint32_t last_fail_timestamp_ms;
 
 ## 7. 仍需讨论的决策点
 
-1. MAC 使用 32-bit 截断还是 64-bit 截断？
-2. v2 包长是否严格限制在 23 字节以内？如果是，建议使用 32-bit MAC；如果可接受 24 字节，建议使用 64-bit MAC。
-3. MAC 算法选择 SipHash、AES-CMAC 还是由端口层注入？
-4. key 如何配置：编译期、运行期、设备出厂写入，还是端口层回调？
-5. counter 是否需要掉电保存？
-6. 是否需要广播地址？当前建议默认关闭。
-7. Ping 冲突是否永远只统计不失败？当前建议只统计。
-8. 是否保留旧 6 字节包格式作为 v1 兼容模式？如果现有设备还未部署，建议不保留。
+1. MAC 算法选择 SipHash、AES-CMAC 还是由端口层注入？当前建议 SipHash-2-4 截断 64-bit。
+2. key 如何配置：编译期、运行期、设备出厂写入，还是端口层回调？
+3. counter 是否需要掉电保存？
+4. 是否需要广播地址？当前建议默认关闭。
+5. Ping 冲突是否永远只统计不失败？当前建议只统计。
 
 ## 8. 推荐下一步
 
-建议下一步拆成 4 个 PR：
+建议下一步拆成 5 个 PR：
 
 1. `test: migrate legacy tests to current notification model`
-2. `feat: make master tolerate corrupted/unrelated packets until timeout`
-3. `feat: add identity fields and versioned packet format`
-4. `feat: add authentication and replay protection`
+2. `release: tag v0.1.0 baseline after test restoration`
+3. `feat: make master tolerate corrupted/unrelated packets until timeout`
+4. `feat: add identity fields and versioned v2 packet format`
+5. `feat: add 64-bit authentication and replay protection`
 
-建议顺序不要跳过前两项。先恢复测试与坏包容错，再做包格式升级和安全能力。
+建议顺序不要跳过前两项。先恢复测试并打 `v0.1.0`，再做坏包容错、包格式升级和安全能力。
