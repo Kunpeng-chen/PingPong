@@ -19,8 +19,11 @@
 以下决策作为正式生产部署方向的输入，不再作为待讨论项。
 
 1. 当前业务场景是一主一从，但仍需要引入设备地址和 `network_id`。
-2. Master 收到 CRC 错误、seq 不匹配、未知 type 等坏包时，应统计并继续等待，直到 RX timeout 再触发重试或失败。
-3. 正式生产目标需要认证与防重放能力，不能只依赖 CRC。
+2. `src_id` / `dst_id` 使用 8-bit 字段。
+3. `network_id` 使用 8-bit 字段。
+4. v2 包长可以接受增加到约 23 字节。
+5. Master 收到 CRC 错误、seq 不匹配、未知 type 等坏包时，应统计并继续等待，直到 RX timeout 再触发重试或失败。
+6. 正式生产目标需要认证与防重放能力，不能只依赖 CRC。
 
 这些决策意味着 PingPong 将从“最小链路探测协议”升级为“可生产部署的单主单从安全心跳 / 链路健康协议”。
 
@@ -67,9 +70,9 @@
 
 ### 4.2 设备身份
 
-- 包内包含 `network_id`
-- 包内包含 `src_id`
-- 包内包含 `dst_id`
+- 包内包含 8-bit `network_id`
+- 包内包含 8-bit `src_id`
+- 包内包含 8-bit `dst_id`
 - 设备只处理目标网络和目标地址的包
 - 即使当前一主一从，也不省略身份字段
 - 广播地址策略明确，默认建议关闭广播
@@ -191,11 +194,13 @@ fail_on_auth_error = false
 
 ```text
 magic_hi | magic_lo | version | type | flags | seq_hi | seq_lo |
-network_hi | network_lo | src_hi | src_lo | dst_hi | dst_lo |
+network_id | src_id | dst_id |
 counter_3 | counter_2 | counter_1 | counter_0 |
-mac_3 | mac_2 | mac_1 | mac_0 |
+mac_7 | mac_6 | mac_5 | mac_4 | mac_3 | mac_2 | mac_1 | mac_0 |
 crc_hi | crc_lo
 ```
+
+当前 v2 包长为 24 字节。如果 MAC 采用 32-bit 截断，则包长为 20 字节；如果采用 64-bit 截断，则包长为 24 字节。你已确认 v2 包长可以接受约 23 字节，因此 24 字节方案需要进一步确认，或改用 32-bit MAC 控制到 20 字节。
 
 字段建议：
 
@@ -204,20 +209,20 @@ crc_hi | crc_lo
 - `type`：PING / PONG
 - `flags`：广播、确认、保留扩展位
 - `seq`：16-bit 序列号，用于请求 / 响应匹配
-- `network_id`：16-bit 网络或产品线隔离
-- `src_id`：16-bit 发送方设备 ID
-- `dst_id`：16-bit 目标设备 ID
+- `network_id`：8-bit 网络或产品线隔离
+- `src_id`：8-bit 发送方设备 ID
+- `dst_id`：8-bit 目标设备 ID
 - `counter`：32-bit rolling counter，用于防重放
-- `mac`：32-bit 截断认证码
+- `mac`：32-bit 或 64-bit 截断认证码
 - `crc`：CRC-16/CCITT，用于误码检测
 
 API 建议：
 
 ```c
 typedef struct {
-    uint16_t local_id;
-    uint16_t peer_id;
-    uint16_t network_id;
+    uint8_t local_id;
+    uint8_t peer_id;
+    uint8_t network_id;
     uint8_t allow_broadcast;
 } ping_pong_identity_t;
 
@@ -238,7 +243,19 @@ ping_pong_err_t ping_pong_set_identity(ping_pong_t *pp,
 
 目标：防止伪造 Ping/Pong 和重放旧包。
 
-建议采用轻量安全层：
+### 4.1 MAC 的作用
+
+MAC 是 Message Authentication Code，消息认证码。它的作用不是加密内容，而是证明“这个包确实由持有密钥的合法设备生成，并且包内容没有被篡改”。
+
+CRC 只能发现传输误码，不能阻止别人伪造包。攻击者可以自己构造一个包并重新计算 CRC。MAC 则需要共享密钥；没有密钥的人即使知道包格式，也很难伪造出合法 MAC。
+
+在 PingPong 中，MAC 主要解决三件事：
+
+1. 防伪造：别人不能随便伪造一个合法 Ping 或 Pong。
+2. 防篡改：包里的 type、seq、src_id、dst_id、counter 等字段被改动后，MAC 校验会失败。
+3. 配合 counter 防重放：旧包再次发送时，即使 MAC 正确，也会因为 counter 太旧而被拒绝。
+
+### 4.2 建议安全层
 
 ```c
 typedef struct {
@@ -406,16 +423,14 @@ uint32_t last_fail_timestamp_ms;
 
 ## 7. 仍需讨论的决策点
 
-1. 地址字段宽度是否确定为 16-bit？当前建议 16-bit。
-2. `network_id` 字段宽度是否确定为 16-bit？当前建议 16-bit。
-3. 是否保留旧 6 字节包格式作为 v1 兼容模式？
-4. v2 包是否接受增加到 23 字节左右？
-5. MAC 使用 32-bit 截断还是 64-bit 截断？
-6. MAC 算法选择 SipHash、AES-CMAC 还是由端口层注入？
-7. key 如何配置：编译期、运行期、设备出厂写入，还是端口层回调？
-8. counter 是否需要掉电保存？
-9. 是否需要广播地址？当前建议默认关闭。
-10. Ping 冲突是否永远只统计不失败？当前建议只统计。
+1. MAC 使用 32-bit 截断还是 64-bit 截断？
+2. v2 包长是否严格限制在 23 字节以内？如果是，建议使用 32-bit MAC；如果可接受 24 字节，建议使用 64-bit MAC。
+3. MAC 算法选择 SipHash、AES-CMAC 还是由端口层注入？
+4. key 如何配置：编译期、运行期、设备出厂写入，还是端口层回调？
+5. counter 是否需要掉电保存？
+6. 是否需要广播地址？当前建议默认关闭。
+7. Ping 冲突是否永远只统计不失败？当前建议只统计。
+8. 是否保留旧 6 字节包格式作为 v1 兼容模式？如果现有设备还未部署，建议不保留。
 
 ## 8. 推荐下一步
 
