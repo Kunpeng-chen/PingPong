@@ -12,6 +12,7 @@
 - 提升长期运行可观测性
 - 恢复并保持完整测试体系
 - 引入认证与防重放能力
+- 支持 Master 连续心跳 / 链路探测运行模式
 - 为后续协议扩展、产测闭环和现场诊断留出空间
 
 ## 2. 已确认设计决策
@@ -31,6 +32,7 @@
 11. Ping 冲突只统计，不立即失败。
 12. key 采用运行期配置 API，由上层从配置区或出厂写入区读取后传入 PingPong。
 13. counter 第一版暂不做掉电保存；后续可扩展为上层持久化或块分配策略。
+14. Master 连续运行应收进协议内核，设计为默认关闭的自动重启模式；内核只做 pending 标记，并在后续 `ping_pong_process()` 中启动下一轮，避免在通知回调里重入。
 
 这些决策意味着 PingPong 将从“最小链路探测协议”升级为“可生产部署的单主单从安全心跳 / 链路健康协议”。
 
@@ -54,6 +56,7 @@
 当前主要限制：
 
 - Master 收到 CRC 或 parse 错误后会立即失败
+- Master 连续运行需要示例层使用 `g_restart_pending` 手动重启
 - 无设备地址与网络 ID
 - 无认证、防伪造、防重放能力
 - 包格式扩展能力有限
@@ -97,6 +100,7 @@
 
 - 统计字段覆盖成功、失败、重试、CRC、parse、冲突、RX timeout、TX timeout
 - 新增地址过滤、认证失败、重放拒绝相关统计
+- 支持 Master 自动连续运行模式，并可配置轮询间隔
 - 可查询最近失败原因
 - 可查询最近收包信息，如 RSSI、SNR、RTT、seq、src_id、dst_id
 - 可选 trace 能够定位状态迁移
@@ -106,6 +110,7 @@
 - 恢复旧测试文件或完成等价迁移
 - 单元测试覆盖率保持不低于 90%
 - 覆盖 Master 忽略坏包后继续等待的行为
+- 覆盖 Master 自动重启行为：SUCCESS 后下一轮启动、FAIL 后下一轮启动、延迟启动、默认关闭
 - 覆盖地址过滤行为
 - 覆盖网络 ID 过滤行为
 - 覆盖认证失败行为
@@ -118,7 +123,8 @@
 - 24 小时连续运行无死锁、无状态卡死
 - 72 小时弱信号或干扰环境运行记录完整
 - 连续失败后 radio reset / protocol reset 策略验证通过
-- 不同超时和重试参数组合验证通过
+- Master 自动连续运行模式下无回调重入和状态异常
+- 不同超时、重试和自动重启间隔参数组合验证通过
 
 ## 5. 分阶段计划
 
@@ -344,9 +350,65 @@ uint32_t network_filter_count;
 
 建议优先级：高。
 
-## Phase 5：失败恢复策略
+## Phase 5：Master 自动连续运行与失败恢复策略
 
-目标：在真实现场中避免长期卡死或连续失败不可恢复。
+目标：减少示例层重复控制逻辑，支持正式现场中的连续心跳 / 链路探测，并避免长期卡死或连续失败不可恢复。
+
+### 5.1 Master 自动连续运行模式
+
+当前 `sample/master_example.c` 使用 `g_restart_pending` 在 `SUCCESS` / `FAIL` 后由主循环重新调用 `ping_pong_start()`。该行为更适合作为协议内核的可配置运行模式，而不是长期留在示例层。
+
+建议扩展配置：
+
+```c
+typedef struct {
+    uint32_t max_retries;
+    uint32_t rx_timeout_ms;
+    uint32_t tx_timeout_ms;
+    uint8_t  auto_restart;
+    uint32_t restart_delay_ms;
+} ping_pong_config_t;
+```
+
+语义：
+
+- `auto_restart = 0`：默认行为，一轮结束后停在 `IDLE`，由上层决定是否再次 `ping_pong_start()`。
+- `auto_restart = 1`：Master 一轮 `SUCCESS` 或 `FAIL` 后，由内核自动启动下一轮。
+- `restart_delay_ms = 0`：下一次 `ping_pong_process()` 立即启动下一轮。
+- `restart_delay_ms > 0`：到达指定延迟后再启动下一轮。
+
+内核实现约束：
+
+- 不在 `notify()` 回调里直接重启，避免重入。
+- 在 `SUCCESS` / `FAIL` 后只记录 pending 标志和下一轮启动时间。
+- 由后续 `ping_pong_process()` 检查 pending 状态并启动下一轮。
+- 默认关闭，保证现有用户行为兼容。
+
+建议内部字段：
+
+```c
+uint8_t auto_restart_pending;
+uint32_t next_start_time;
+```
+
+示例目标：
+
+- 删除 `sample/master_example.c` 中的 `g_restart_pending`。
+- `master_process()` 只调用 `ping_pong_process(g_master)`。
+- 通过配置启用连续 Master Ping。
+
+验收标准：
+
+- 默认 `auto_restart = 0` 时行为与当前一致。
+- `auto_restart = 1` 时，Master 成功后能自动启动下一轮。
+- `auto_restart = 1` 时，Master 失败后能自动启动下一轮。
+- `restart_delay_ms` 生效。
+- 通知回调中不会发生 PingPong API 重入。
+- 单元测试覆盖成功重启、失败重启、延迟重启和默认关闭。
+
+建议优先级：中高，可作为独立 PR `feat: add master auto-restart mode`。
+
+### 5.2 失败恢复策略
 
 建议新增上层策略文档，而不一定全部放入核心。
 
@@ -391,6 +453,7 @@ uint32_t last_fail_timestamp_ms;
 10. 重放包注入测试
 11. 跨 network_id 干扰测试
 12. 错误 dst_id 干扰测试
+13. Master 自动连续运行长时间稳定性测试
 
 记录指标：
 
@@ -406,6 +469,7 @@ uint32_t last_fail_timestamp_ms;
 - replay_error_count
 - address_filter_count
 - network_filter_count
+- consecutive_fail_count
 - RTT 分布
 - RSSI / SNR 分布
 - 连续失败最大次数
@@ -414,6 +478,7 @@ uint32_t last_fail_timestamp_ms;
 
 - 24 小时强信号无连续不可恢复失败
 - 72 小时弱信号无状态卡死
+- Master 自动连续运行模式无重入、无状态异常
 - 所有失败均有可解释统计
 - 断电重启后可自动恢复通信
 - 伪造包、重放包、跨网络包不会触发错误成功
@@ -448,8 +513,10 @@ uint32_t last_fail_timestamp_ms;
 - 增加认证失败和重放统计
 - 完成伪造 / 重放测试
 
-### M5：试点可观测
+### M5：Master 自动连续运行与试点可观测
 
+- 增加 Master `auto_restart` / `restart_delay_ms`
+- 删除 master 示例中的 `g_restart_pending`
 - 增加 last_fail_reason / consecutive_fail_count
 - 示例增加 reset 策略
 - 日志与统计字段文档完善
@@ -466,12 +533,13 @@ uint32_t last_fail_timestamp_ms;
 
 ## 8. 推荐下一步
 
-建议下一步拆成 5 个 PR：
+建议下一步拆成 6 个 PR：
 
 1. `test: migrate legacy tests to current notification model`
 2. `release: tag v0.1.0 baseline after test restoration`
 3. `feat: make master tolerate corrupted/unrelated packets until timeout`
 4. `feat: add identity fields and versioned v2 packet format`
 5. `feat: add SipHash-2-4 authentication and replay protection`
+6. `feat: add master auto-restart mode`
 
-建议顺序不要跳过前两项。先恢复测试并打 `v0.1.0`，再做坏包容错、包格式升级和安全能力。
+建议顺序不要跳过前两项。先恢复测试并打 `v0.1.0`，再做坏包容错、包格式升级、安全能力和自动连续运行能力。
