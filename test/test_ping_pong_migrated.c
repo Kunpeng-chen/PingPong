@@ -57,18 +57,6 @@ static const ping_pong_notify_t *last_notify(ping_pong_notify_type_t type)
     return NULL;
 }
 
-static int notify_count(ping_pong_notify_type_t type)
-{
-    int i;
-    int count = 0;
-    for (i = 0; i < g_notify_count; i++) {
-        if (g_notifications[i].type == type) {
-            count++;
-        }
-    }
-    return count;
-}
-
 static void init_instance(ping_pong_t *pp, const ping_pong_config_t *config)
 {
     ping_pong_port_t port = {
