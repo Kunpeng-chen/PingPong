@@ -31,6 +31,19 @@
 6. `[ ]` `feat: add identity fields and versioned v2 packet format`
 7. `[ ]` `feat: add SipHash-2-4 authentication and replay protection`
 
+## Alpha Tag 里程碑
+
+- Phase 1 完成后：创建 `v0.1.0-alpha` [√]
+- Phase 4 完成后：创建 `v0.2.0-alpha` [ ]
+- Phase 5 完成后：创建 `v0.3.0-alpha` [ ]
+- Phase 6 完成后：创建 `v0.4.0-alpha` [ ]
+
+Tag 创建规则：
+
+- 只有对应 Phase 的实现 PR 已合并到 `main` 后，才允许创建 tag。
+- Tag 必须指向已通过 CI 的 `main` 提交。
+- 创建 tag 后，将对应里程碑尾部从 `[ ]` 更新为 `[√]`。
+
 ## 新增配置计划说明
 
 `feat: add compile-time default config header` 的目标是引入 `src/ping_pong_config.h`，形成“编译期默认配置 + 运行时覆盖配置”的双层模型。
