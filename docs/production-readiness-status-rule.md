@@ -14,7 +14,7 @@
 ## 当前推荐状态
 
 - Phase 1：恢复测试体系与 CI 稳定性 [√]
-- Phase 2：增强 Master 对坏包的容错 [ ]
+- Phase 2：增强 Master 对坏包的容错 [√]
 - Phase 3：编译期默认配置与运行时覆盖 [ ]
 - Phase 4：Master 自动连续运行与失败恢复策略 [ ]
 - Phase 5：引入设备地址和网络 ID [ ]
@@ -25,7 +25,7 @@
 
 1. `[√]` `test: migrate legacy tests to current notification model`
 2. `[√]` `release: tag v0.1.0 baseline after test restoration`
-3. `[ ]` `feat: make master tolerate corrupted/unrelated packets until timeout`
+3. `[√]` `feat: make master tolerate corrupted/unrelated packets until timeout`
 4. `[ ]` `feat: add compile-time default config header`
 5. `[ ]` `feat: add master auto-restart mode`
 6. `[ ]` `feat: add identity fields and versioned v2 packet format`
@@ -43,6 +43,29 @@ Tag 创建规则：
 - 只有对应 Phase 的实现 PR 已合并到 `main` 后，才允许创建 tag。
 - Tag 必须指向已通过 CI 的 `main` 提交。
 - 创建 tag 后，将对应里程碑尾部从 `[ ]` 更新为 `[√]`。
+
+## 标准执行流程
+
+后续所有 Phase 默认使用 `docs/phase-execution-workflow.md` 中记录的标准流程推进。
+
+核心规则：
+
+1. 从最新 `main` 创建干净实现分支。
+2. 实现 PR 只包含当前 Phase 的必要代码、测试和少量说明。
+3. 不从 `docs/production-readiness-plan` 等文档分支直接开实现 PR。
+4. 如果 PR 出现 `mergeable: false`，重新从 `main` 创建干净分支，只迁移必要变更。
+5. PR 必须确认 `mergeable: true`。
+6. CI 必须完成且 `conclusion: success`。
+7. 使用 squash merge 合并到 `main`。
+8. 合并后再更新本状态文档。
+
+Phase 2 已验证该流程：
+
+- 干净实现分支：`feat/phase2-master-bad-packet-tolerance`
+- 成功 PR：#10
+- CI：`CI` run #60，`success`
+- 合并方式：squash merge
+- merge commit：`066c75e05b04a1de1334f5fc64a0903e38e22d11`
 
 ## 新增配置计划说明
 
