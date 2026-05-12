@@ -2,8 +2,6 @@
  * PingPong focused regression tests for the optimized API.
  */
 
-/*============================ INCLUDES ======================================*/
-
 #include "ping_pong.h"
 #include <assert.h>
 #include <stdint.h>
@@ -11,24 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*============================ MACROS ========================================*/
-
 #define TEST_CTX_EXTRA_BYTES 256u
 #define MAX_NOTIFICATIONS   128
-
-/*============================ MACROFIED FUNCTIONS ===========================*/
-
-/* None. */
-
-/*============================ TYPES =========================================*/
-
-/* None. */
-
-/*============================ GLOBAL VARIABLES ==============================*/
-
-/* None. */
-
-/*============================ LOCAL VARIABLES ===============================*/
 
 static uint32_t g_time_ms;
 static ping_pong_notify_t g_notifications[MAX_NOTIFICATIONS];
@@ -36,30 +18,6 @@ static int g_notify_count;
 static int g_trace_count;
 static int g_user_data_value = 42;
 static void *g_seen_user_data;
-
-/*============================ PROTOTYPES ====================================*/
-
-static uint32_t mock_get_time_ms(void);
-static void mock_trace(const char *msg);
-static void mock_notify(ping_pong_t *pp, const ping_pong_notify_t *notify,
-                        void *user_data);
-static uint8_t *alloc_instance(void);
-static void reset_recording(void);
-static const ping_pong_notify_t *find_last_notify(ping_pong_notify_type_t type);
-static int count_notify(ping_pong_notify_type_t type);
-static void init_with_config(ping_pong_t *pp, const ping_pong_config_t *config);
-static void init_master(ping_pong_t *pp);
-static void init_slave(ping_pong_t *pp, uint32_t rx_timeout_ms);
-static void test_build_packet_helpers(void);
-static void test_init_and_config_errors(void);
-static void test_state_lifecycle_errors(void);
-static void test_tx_len_and_core_built_packet(void);
-static void test_master_success_retry_and_fail(void);
-static void test_master_rx_error_paths(void);
-static void test_slave_flow_and_error_paths(void);
-static void test_added_stats_counters(void);
-
-/*============================ IMPLEMENTATION ================================*/
 
 static uint32_t mock_get_time_ms(void)
 {
@@ -155,6 +113,14 @@ static void init_slave(ping_pong_t *pp, uint32_t rx_timeout_ms)
         .tx_timeout_ms = 10,
     };
     init_with_config(pp, &config);
+}
+
+static void start_master_rx_wait(ping_pong_t *pp)
+{
+    init_master(pp);
+    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
+    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
 }
 
 static void test_build_packet_helpers(void)
@@ -352,57 +318,40 @@ static void test_master_rx_error_paths(void)
     ping_pong_t *pp = (ping_pong_t *)mem;
     uint8_t packet[PING_PONG_PACKET_SIZE];
     ping_pong_stats_t stats;
-    const ping_pong_notify_t *notify;
 
-    init_master(pp);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
+    start_master_rx_wait(pp);
     assert(ping_pong_on_rx_done(pp, packet, 3, 0, 0) == PING_PONG_ERR_INVALID_PARAM);
     assert(ping_pong_on_rx_done(pp, NULL, sizeof(packet), 0, 0) == PING_PONG_ERR_NULL_PTR);
 
     assert(ping_pong_build_pong(packet, sizeof(packet), 0) == PING_PONG_OK);
     packet[4] ^= 0x55u;
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    notify = find_last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(notify != NULL);
-    assert(notify->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CRC_ERROR);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
     assert(ping_pong_get_stats(pp, &stats) == PING_PONG_OK);
     assert(stats.crc_error_count == 1);
 
-    assert(ping_pong_reset(pp) == PING_PONG_OK);
-    init_master(pp);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
     assert(ping_pong_build_pong(packet, sizeof(packet), 99) == PING_PONG_OK);
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    notify = find_last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(notify != NULL);
-    assert(notify->payload.fail.fail_reason == PING_PONG_FAIL_REASON_PARSE_ERROR);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
     assert(ping_pong_get_stats(pp, &stats) == PING_PONG_OK);
     assert(stats.parse_error_count == 1);
 
-    assert(ping_pong_reset(pp) == PING_PONG_OK);
-    init_master(pp);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
     assert(ping_pong_build_ping(packet, sizeof(packet), 0) == PING_PONG_OK);
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    notify = find_last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(notify != NULL);
-    assert(notify->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CONFLICT);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
     assert(ping_pong_get_stats(pp, &stats) == PING_PONG_OK);
     assert(stats.conflict_count == 1);
 
-    assert(ping_pong_reset(pp) == PING_PONG_OK);
-    init_master(pp);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
     packet[0] = 0xAAu;
     packet[1] = packet[2] = packet[3] = packet[4] = packet[5] = 0;
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    notify = find_last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(notify != NULL);
-    assert(notify->payload.fail.fail_reason == PING_PONG_FAIL_REASON_PARSE_ERROR);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
+    assert(ping_pong_get_stats(pp, &stats) == PING_PONG_OK);
+    assert(stats.parse_error_count == 2);
 
     free(mem);
     printf("  PASS: test_master_rx_error_paths\n");
