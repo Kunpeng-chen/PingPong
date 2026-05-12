@@ -52,6 +52,30 @@ struct ping_pong {
     ping_pong_stats_t stats;
 };
 
+static inline void pp_memset(void *dst, int val, uint32_t len);
+static inline uint16_t get_u16_be(const uint8_t *buf);
+static int is_valid_transition(ping_pong_state_t state, pp_event_t event);
+static void send_notify(ping_pong_t *pp, const ping_pong_notify_t *notify);
+static uint16_t compute_crc16(const uint8_t *data, uint32_t len);
+static ping_pong_identity_t default_master_identity(void);
+static ping_pong_err_t build_packet_with_identity(uint8_t *buf, uint32_t buf_size,
+                                                  uint8_t type, uint16_t seq,
+                                                  const ping_pong_identity_t *identity,
+                                                  uint8_t reverse);
+static ping_pong_err_t build_packet(uint8_t *buf, uint32_t buf_size, uint8_t type,
+                                    uint16_t seq);
+static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
+                        uint8_t expected_type, parsed_packet_t *packet);
+static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms,
+                                  int16_t rssi, int16_t snr);
+static void handle_master_fail(ping_pong_t *pp, uint32_t reason);
+static void handle_master_retry(ping_pong_t *pp);
+static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
+                                        int16_t rssi, int16_t snr);
+static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
+static void send_tx_request(ping_pong_t *pp);
+static void record_parse_failure(ping_pong_t *pp, int rc);
+
 static const uint8_t valid_transitions[4][EVT_COUNT] = {
     [PING_PONG_STATE_IDLE] = {
         [EVT_START_MASTER] = 1, [EVT_START_SLAVE] = 1,
@@ -246,9 +270,6 @@ static void handle_master_retry(ping_pong_t *pp)
     pp->tx_start_time = pp->port.get_time_ms();
     send_tx_request(pp);
 }
-
-static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
-static void send_tx_request(ping_pong_t *pp);
 
 static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
                                         int16_t rssi, int16_t snr)
