@@ -6,6 +6,8 @@
 
 每个阶段必须使用“干净实现分支 + 独立 PR + CI 通过 + squash merge”的流程推进，避免把计划文档分支、历史临时提交或无关变更混入实现 PR。
 
+每一次实现 PR 合并到 `main` 后，都必须检查并更新 `README.md`，确保用户看到的项目说明、功能状态、接口说明和示例入口与主分支最新能力一致。
+
 ## 2. 标准流程
 
 ### Step 1：从最新 `main` 创建干净实现分支
@@ -98,13 +100,27 @@ PR #10: feat: make master tolerate corrupted packets until timeout
 merge commit: 066c75e05b04a1de1334f5fc64a0903e38e22d11
 ```
 
-## Step 8：合并后更新计划状态
+## Step 8：合并后更新 README
+
+每一次实现 PR 合并到 `main` 后，都必须检查并更新 `README.md`。
+
+README 更新内容至少包括：
+
+- 当前主分支已经具备的新能力
+- 关键行为变化
+- 新增或调整后的测试 / 示例入口
+- 对用户接入方式有影响的配置、接口或注意事项
+
+如果当前 Phase 没有 README 可见变化，也需要在执行记录中明确说明“已检查 README，无需更新”。
+
+## Step 9：合并后更新计划状态
 
 只有当以下条件全部满足后，才能把对应 Phase 标记为 `[√]`：
 
 - 实现 PR 已合并到 `main`
 - CI 已通过
 - 相关测试已覆盖
+- README 已更新，或已明确记录无需更新
 - 无遗留冲突 PR
 - 状态规则文档已更新
 
@@ -121,7 +137,8 @@ merge commit: 066c75e05b04a1de1334f5fc64a0903e38e22d11
 7. 检查 `mergeable: true`
 8. 等待 CI `success`
 9. squash merge
-10. 更新计划状态
+10. 更新 README，或明确记录无需更新
+11. 更新计划状态
 
 ## 4. 禁止事项
 
@@ -131,6 +148,7 @@ merge commit: 066c75e05b04a1de1334f5fc64a0903e38e22d11
 - 禁止 mergeable=false 时强行推进
 - 禁止只新增测试而不更新已有旧行为断言
 - 禁止把计划状态提前标记为完成
+- 禁止合并到 `main` 后跳过 README 检查
 
 ## 5. 推荐提交/PR 命名
 
