@@ -30,8 +30,10 @@ extern "C" {
 #define PING_PONG_FAIL_REASON_TX_TIMEOUT   5
 #define PING_PONG_FAIL_REASON_CONFLICT     6
 
-#define PING_PONG_MIN_PACKET_SIZE  6
-#define PING_PONG_PACKET_SIZE      PING_PONG_MIN_PACKET_SIZE
+#define PING_PONG_PROTOCOL_VERSION  2
+#define PING_PONG_BROADCAST_ID      0xFFu
+#define PING_PONG_MIN_PACKET_SIZE   24
+#define PING_PONG_PACKET_SIZE       PING_PONG_MIN_PACKET_SIZE
 
 #ifndef PING_PONG_MAX_TIMEOUT_MS
 #define PING_PONG_MAX_TIMEOUT_MS   600000
@@ -54,6 +56,16 @@ extern "C" {
 #define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000
 #endif
 
+#ifndef PING_PONG_DEFAULT_LOCAL_ID
+#define PING_PONG_DEFAULT_LOCAL_ID       1u
+#endif
+#ifndef PING_PONG_DEFAULT_PEER_ID
+#define PING_PONG_DEFAULT_PEER_ID        2u
+#endif
+#ifndef PING_PONG_DEFAULT_NETWORK_ID
+#define PING_PONG_DEFAULT_NETWORK_ID     1u
+#endif
+
 /**
  * @brief Define a static PingPong object instance and its backing memory.
  *
@@ -71,10 +83,6 @@ extern "C" {
 #define PING_PONG_DEFINE_INSTANCE(name)                                      \
     static uint8_t name##_buffer[256u + PING_PONG_TX_BUFFER_SIZE];           \
     static ping_pong_t *name = (ping_pong_t *)name##_buffer
-
-/*============================ MACROFIED FUNCTIONS ===========================*/
-
-/* None. */
 
 /*============================ TYPES =========================================*/
 
@@ -117,21 +125,31 @@ typedef struct {
     uint32_t tx_timeout_ms; /**< TX timeout protection. Set 0 to disable. */
 } ping_pong_config_t;
 
+/** @brief Device and network identity used by the v2 packet filters. */
+typedef struct {
+    uint8_t local_id;        /**< This device ID. */
+    uint8_t peer_id;         /**< Expected peer device ID. */
+    uint8_t network_id;      /**< Product/network isolation ID. */
+    uint8_t allow_broadcast; /**< Accept dst_id == PING_PONG_BROADCAST_ID when non-zero. */
+} ping_pong_identity_t;
+
 /** @brief Raw protocol statistics. */
 typedef struct {
-    uint32_t success_count;     /**< Successful rounds, MASTER only. */
-    uint32_t fail_count;        /**< Failed rounds, MASTER only. */
-    uint32_t retry_count;       /**< Retry count, MASTER only. */
-    uint32_t tx_count;          /**< Transmitted packet count. */
-    uint32_t rx_count;          /**< Valid received packet count. */
-    uint32_t conflict_count;    /**< Role conflict count. */
-    uint32_t crc_error_count;   /**< CRC validation error count. */
-    uint32_t parse_error_count; /**< Packet format, type, or sequence error count. */
-    uint32_t rx_timeout_count;  /**< RX timeout count. */
-    uint32_t tx_timeout_count;  /**< TX timeout count. */
-    uint32_t last_rtt_ms;       /**< Last measured RTT, MASTER only. */
-    int16_t  last_rssi;         /**< Last received RSSI. */
-    int16_t  last_snr;          /**< Last received SNR. */
+    uint32_t success_count;        /**< Successful rounds, MASTER only. */
+    uint32_t fail_count;           /**< Failed rounds, MASTER only. */
+    uint32_t retry_count;          /**< Retry count, MASTER only. */
+    uint32_t tx_count;             /**< Transmitted packet count. */
+    uint32_t rx_count;             /**< Valid received packet count. */
+    uint32_t conflict_count;       /**< Role conflict count. */
+    uint32_t crc_error_count;      /**< CRC validation error count. */
+    uint32_t parse_error_count;    /**< Packet format, type, or sequence error count. */
+    uint32_t rx_timeout_count;     /**< RX timeout count. */
+    uint32_t tx_timeout_count;     /**< TX timeout count. */
+    uint32_t network_filter_count; /**< Packets ignored because network_id did not match. */
+    uint32_t address_filter_count; /**< Packets ignored because dst_id did not match. */
+    uint32_t last_rtt_ms;          /**< Last measured RTT, MASTER only. */
+    int16_t  last_rssi;            /**< Last received RSSI. */
+    int16_t  last_snr;             /**< Last received SNR. */
 } ping_pong_stats_t;
 
 /** @brief Notification payload passed to ping_pong_port_t::notify. */
@@ -167,14 +185,6 @@ typedef struct {
     void (*trace)(const char *msg);  /**< Optional debug trace hook. */
 } ping_pong_port_t;
 
-/*============================ GLOBAL VARIABLES ==============================*/
-
-/* None. */
-
-/*============================ LOCAL VARIABLES ===============================*/
-
-/* None. */
-
 /*============================ PROTOTYPES ====================================*/
 
 /**
@@ -202,6 +212,15 @@ ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port);
 ping_pong_err_t ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *config);
 
 /**
+ * @brief Override v2 network/device identity while the instance is idle or stopped.
+ * @param pp PingPong instance.
+ * @param identity New identity values. Broadcast receive is disabled by default.
+ * @return PING_PONG_OK or an error code.
+ */
+ping_pong_err_t ping_pong_set_identity(ping_pong_t *pp,
+                                        const ping_pong_identity_t *identity);
+
+/**
  * @brief Start the protocol as MASTER or SLAVE.
  * @param pp PingPong instance.
  * @param role PING_PONG_ROLE_MASTER or PING_PONG_ROLE_SLAVE.
@@ -209,43 +228,19 @@ ping_pong_err_t ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *
  */
 ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role);
 
-/**
- * @brief Stop a running instance.
- * @param pp PingPong instance.
- * @return PING_PONG_OK or an error code.
- */
+/** @brief Stop a running instance. */
 ping_pong_err_t ping_pong_stop(ping_pong_t *pp);
 
-/**
- * @brief Reset runtime state and statistics back to IDLE.
- * @param pp PingPong instance.
- * @return PING_PONG_OK or an error code.
- */
+/** @brief Reset runtime state and statistics back to IDLE. */
 ping_pong_err_t ping_pong_reset(ping_pong_t *pp);
 
-/**
- * @brief Drive timeout handling. Call periodically from the main loop.
- * @param pp PingPong instance.
- * @return PING_PONG_OK or an error code.
- */
+/** @brief Drive timeout handling. Call periodically from the main loop. */
 ping_pong_err_t ping_pong_process(ping_pong_t *pp);
 
-/**
- * @brief Notify the core that the platform radio TX operation has completed.
- * @param pp PingPong instance.
- * @return PING_PONG_OK or an error code.
- */
+/** @brief Notify the core that the platform radio TX operation has completed. */
 ping_pong_err_t ping_pong_on_tx_done(ping_pong_t *pp);
 
-/**
- * @brief Notify the core that a platform radio RX operation has completed.
- * @param pp PingPong instance.
- * @param data Received bytes.
- * @param len Received byte count.
- * @param rssi Received signal strength.
- * @param snr Signal-to-noise ratio.
- * @return PING_PONG_OK or an error code.
- */
+/** @brief Notify the core that a platform radio RX operation has completed. */
 ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len,
                                       int16_t rssi, int16_t snr);
 
@@ -255,19 +250,14 @@ ping_pong_state_t ping_pong_get_state(const ping_pong_t *pp);
 /** @brief Return the current role, or NONE for an invalid instance. */
 ping_pong_role_t ping_pong_get_role(const ping_pong_t *pp);
 
-/**
- * @brief Copy current statistics.
- * @param pp PingPong instance.
- * @param stats Output statistics structure.
- * @return PING_PONG_OK or an error code.
- */
+/** @brief Copy current statistics. */
 ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *stats);
 
 /** @brief Return 1 if the instance pointer looks initialized, otherwise 0. */
 int ping_pong_is_valid(const ping_pong_t *pp);
 
 /**
- * @brief Build a fixed-size Ping packet.
+ * @brief Build a v2 Ping packet with the default identity pair.
  * @param buf Output buffer.
  * @param buf_size Output buffer capacity. Must be at least PING_PONG_PACKET_SIZE.
  * @param seq 16-bit sequence number.
@@ -276,17 +266,13 @@ int ping_pong_is_valid(const ping_pong_t *pp);
 ping_pong_err_t ping_pong_build_ping(uint8_t *buf, uint32_t buf_size, uint16_t seq);
 
 /**
- * @brief Build a fixed-size Pong packet.
+ * @brief Build a v2 Pong packet with the default identity pair.
  * @param buf Output buffer.
  * @param buf_size Output buffer capacity. Must be at least PING_PONG_PACKET_SIZE.
  * @param seq 16-bit sequence number.
  * @return PING_PONG_OK or an error code.
  */
 ping_pong_err_t ping_pong_build_pong(uint8_t *buf, uint32_t buf_size, uint16_t seq);
-
-/*============================ IMPLEMENTATION ================================*/
-
-/* None. */
 
 #ifdef __cplusplus
 }
