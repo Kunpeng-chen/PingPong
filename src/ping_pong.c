@@ -445,17 +445,17 @@ ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint3
                 handle_master_success(pp, rtt_ms, rssi, snr);
             } else if (rc == PARSE_ERR_CRC) {
                 pp->stats.crc_error_count++;
-                handle_master_fail(pp, PING_PONG_FAIL_REASON_CRC_ERROR);
+                PP_TRACE(pp, "master: ignore crc error");
             } else {
                 pp->stats.parse_error_count++;
-                handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
+                PP_TRACE(pp, "master: ignore parse error");
             }
         } else if (header->type == PACKET_TYPE_PING) {
             pp->stats.conflict_count++;
-            handle_master_fail(pp, PING_PONG_FAIL_REASON_CONFLICT);
+            PP_TRACE(pp, "master: ignore ping conflict");
         } else {
             pp->stats.parse_error_count++;
-            handle_master_fail(pp, PING_PONG_FAIL_REASON_PARSE_ERROR);
+            PP_TRACE(pp, "master: ignore unknown packet type");
         }
     } else if (pp->role == PING_PONG_ROLE_SLAVE) {
         if (header->type == PACKET_TYPE_PING) {
