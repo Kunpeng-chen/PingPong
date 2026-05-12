@@ -57,6 +57,28 @@ static const ping_pong_notify_t *last_notify(ping_pong_notify_type_t type)
     return NULL;
 }
 
+static int count_notify(ping_pong_notify_type_t type)
+{
+    int count = 0;
+    int i;
+    for (i = 0; i < g_notify_count; i++) {
+        if (g_notifications[i].type == type) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static ping_pong_config_t default_config(void)
+{
+    ping_pong_config_t config = {
+        .max_retries = 3,
+        .rx_timeout_ms = 100,
+        .tx_timeout_ms = 0,
+    };
+    return config;
+}
+
 static void init_instance(ping_pong_t *pp, const ping_pong_config_t *config)
 {
     ping_pong_port_t port = {
@@ -73,14 +95,12 @@ static void init_instance(ping_pong_t *pp, const ping_pong_config_t *config)
     }
 }
 
-static ping_pong_config_t default_config(void)
+static void start_master_rx_wait(ping_pong_t *pp, const ping_pong_config_t *config)
 {
-    ping_pong_config_t config = {
-        .max_retries = 3,
-        .rx_timeout_ms = 100,
-        .tx_timeout_ms = 0,
-    };
-    return config;
+    init_instance(pp, config);
+    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
+    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
 }
 
 static void test_init_config_and_lifecycle(void)
@@ -161,7 +181,7 @@ static void test_master_success_and_restart_seq(void)
     printf("  PASS: test_master_success_and_restart_seq\n");
 }
 
-static void test_master_retry_fail_and_error_paths(void)
+static void test_master_retry_fail_and_tolerant_error_paths(void)
 {
     uint8_t *mem = alloc_instance();
     ping_pong_t *pp = (ping_pong_t *)mem;
@@ -171,9 +191,7 @@ static void test_master_retry_fail_and_error_paths(void)
     const ping_pong_notify_t *fail;
 
     config.max_retries = 1;
-    init_instance(pp, &config);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
+    start_master_rx_wait(pp, &config);
     g_time_ms = 101;
     assert(ping_pong_process(pp) == PING_PONG_OK);
     assert(ping_pong_get_state(pp) == PING_PONG_STATE_TX);
@@ -188,38 +206,38 @@ static void test_master_retry_fail_and_error_paths(void)
     assert(stats.rx_timeout_count == 1);
 
     assert(ping_pong_reset(pp) == PING_PONG_OK);
-    init_instance(pp, &config);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
+    start_master_rx_wait(pp, &config);
+
     assert(ping_pong_build_pong(packet, sizeof(packet), 0) == PING_PONG_OK);
     packet[4] ^= 0x55u;
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    fail = last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(fail != NULL);
-    assert(fail->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CRC_ERROR);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
 
-    assert(ping_pong_reset(pp) == PING_PONG_OK);
-    init_instance(pp, &config);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
     assert(ping_pong_build_pong(packet, sizeof(packet), 99) == PING_PONG_OK);
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    fail = last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(fail != NULL);
-    assert(fail->payload.fail.fail_reason == PING_PONG_FAIL_REASON_PARSE_ERROR);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
 
-    assert(ping_pong_reset(pp) == PING_PONG_OK);
-    init_instance(pp, &config);
-    assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
-    assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
     assert(ping_pong_build_ping(packet, sizeof(packet), 0) == PING_PONG_OK);
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
-    fail = last_notify(PING_PONG_NOTIFY_FAIL);
-    assert(fail != NULL);
-    assert(fail->payload.fail.fail_reason == PING_PONG_FAIL_REASON_CONFLICT);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
+
+    packet[0] = 0xAAu;
+    packet[1] = packet[2] = packet[3] = packet[4] = packet[5] = 0;
+    assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), -40, 7) == PING_PONG_OK);
+    assert(ping_pong_get_state(pp) == PING_PONG_STATE_RX_WAIT);
+    assert(count_notify(PING_PONG_NOTIFY_FAIL) == 0);
+
+    assert(ping_pong_get_stats(pp, &stats) == PING_PONG_OK);
+    assert(stats.crc_error_count == 1);
+    assert(stats.parse_error_count == 2);
+    assert(stats.conflict_count == 1);
+    assert(stats.fail_count == 0);
 
     free(mem);
-    printf("  PASS: test_master_retry_fail_and_error_paths\n");
+    printf("  PASS: test_master_retry_fail_and_tolerant_error_paths\n");
 }
 
 static void test_slave_flow_timeout_and_no_timeout(void)
@@ -354,7 +372,7 @@ int main(void)
     printf("Running migrated PingPong legacy tests...\n");
     test_init_config_and_lifecycle();
     test_master_success_and_restart_seq();
-    test_master_retry_fail_and_error_paths();
+    test_master_retry_fail_and_tolerant_error_paths();
     test_slave_flow_timeout_and_no_timeout();
     test_slave_error_paths();
     test_tx_timeout_and_invalid_calls();
