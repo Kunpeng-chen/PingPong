@@ -4,11 +4,15 @@
 
 #include "ping_pong.h"
 
-#define PING_PONG_MAGIC 0x50494E47
+#define PING_PONG_MAGIC 0x50494E47u
 #define PACKET_TYPE_PING  0x01u
 #define PACKET_TYPE_PONG  0x02u
 #define PACKET_VERSION_V2 ((uint8_t)PING_PONG_PROTOCOL_VERSION_V2)
 #define PING_PONG_CRC_SIZE 2u
+#define V2_VERSION_OFFSET 3u
+#define V2_NETWORK_OFFSET 4u
+#define V2_SRC_OFFSET     8u
+#define V2_DST_OFFSET     10u
 #define V2_HEADER_CRC_OFFSET 22u
 #define PARSE_OK          0
 #define PARSE_ERR_FORMAT (-1)
@@ -143,41 +147,20 @@ static uint16_t compute_crc16(const uint8_t *data, uint32_t len)
 
 static int is_v2_packet(const uint8_t *data, uint32_t len)
 {
-    return (data != NULL && len >= PING_PONG_V2_PACKET_SIZE && data[0] == PACKET_VERSION_V2) ? 1 : 0;
+    return (data != NULL && len >= PING_PONG_V2_PACKET_SIZE &&
+            data[V2_VERSION_OFFSET] == PACKET_VERSION_V2) ? 1 : 0;
 }
 
 static uint8_t packet_type(const uint8_t *data, uint32_t len)
 {
-    if (is_v2_packet(data, len)) {
-        return data[1];
-    }
+    (void)len;
     return data[0];
 }
 
 static uint16_t packet_seq(const uint8_t *data, uint32_t len)
 {
-    if (is_v2_packet(data, len)) {
-        return get_u16_be(&data[2]);
-    }
+    (void)len;
     return get_u16_be(&data[1]);
-}
-
-static ping_pong_err_t build_v1_packet(uint8_t *buf, uint32_t buf_size,
-                                       uint8_t type, uint16_t seq)
-{
-    uint16_t crc;
-    if (!buf) {
-        return PING_PONG_ERR_NULL_PTR;
-    }
-    if (buf_size < PING_PONG_V1_PACKET_SIZE) {
-        return PING_PONG_ERR_INVALID_PARAM;
-    }
-    buf[0] = type;
-    put_u16_be(&buf[1], seq);
-    buf[3] = 0u;
-    crc = compute_crc16(buf, 4u);
-    put_u16_be(&buf[4], crc);
-    return PING_PONG_OK;
 }
 
 static ping_pong_err_t build_v2_packet(uint8_t *buf, uint32_t buf_size,
@@ -193,12 +176,12 @@ static ping_pong_err_t build_v2_packet(uint8_t *buf, uint32_t buf_size,
         return PING_PONG_ERR_INVALID_PARAM;
     }
     pp_memset(buf, 0, PING_PONG_V2_PACKET_SIZE);
-    buf[0] = PACKET_VERSION_V2;
-    buf[1] = type;
-    put_u16_be(&buf[2], seq);
-    put_u32_be(&buf[4], network_id);
-    put_u16_be(&buf[8], src_id);
-    put_u16_be(&buf[10], dst_id);
+    buf[0] = type;
+    put_u16_be(&buf[1], seq);
+    buf[V2_VERSION_OFFSET] = PACKET_VERSION_V2;
+    put_u32_be(&buf[V2_NETWORK_OFFSET], network_id);
+    put_u16_be(&buf[V2_SRC_OFFSET], src_id);
+    put_u16_be(&buf[V2_DST_OFFSET], dst_id);
     crc = compute_crc16(buf, V2_HEADER_CRC_OFFSET);
     put_u16_be(&buf[V2_HEADER_CRC_OFFSET], crc);
     return PING_PONG_OK;
@@ -239,7 +222,6 @@ ping_pong_err_t ping_pong_build_pong_ex(uint8_t *buf, uint32_t buf_size, uint16_
 static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
                         uint8_t expected_type, uint8_t check_seq)
 {
-    uint32_t crc_offset;
     uint16_t computed_crc;
     uint16_t received_crc;
 
@@ -248,25 +230,24 @@ static int parse_packet(ping_pong_t *pp, const uint8_t *data, uint32_t len,
     }
 
     if (is_v2_packet(data, len)) {
-        crc_offset = V2_HEADER_CRC_OFFSET;
-        computed_crc = compute_crc16(data, crc_offset);
-        received_crc = get_u16_be(&data[crc_offset]);
+        computed_crc = compute_crc16(data, V2_HEADER_CRC_OFFSET);
+        received_crc = get_u16_be(&data[V2_HEADER_CRC_OFFSET]);
         if (computed_crc != received_crc) {
             return PARSE_ERR_CRC;
         }
-        if (data[1] != expected_type) {
+        if (data[0] != expected_type) {
             return PARSE_ERR_FORMAT;
         }
-        if (get_u32_be(&data[4]) != pp->config.network_id) {
+        if (get_u32_be(&data[V2_NETWORK_OFFSET]) != pp->config.network_id) {
             return PARSE_ERR_FORMAT;
         }
-        if (get_u16_be(&data[10]) != pp->config.src_id) {
+        if (get_u16_be(&data[V2_DST_OFFSET]) != pp->config.src_id) {
             return PARSE_ERR_FORMAT;
         }
-        if (get_u16_be(&data[8]) != pp->config.dst_id) {
+        if (get_u16_be(&data[V2_SRC_OFFSET]) != pp->config.dst_id) {
             return PARSE_ERR_FORMAT;
         }
-        if (check_seq && get_u16_be(&data[2]) != pp->current_seq) {
+        if (check_seq && get_u16_be(&data[1]) != pp->current_seq) {
             return PARSE_ERR_FORMAT;
         }
         return PARSE_OK;
