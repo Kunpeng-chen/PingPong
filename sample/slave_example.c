@@ -16,7 +16,7 @@
 /*============================ MACROS ========================================*/
 
 /* SLAVE_RX_TIMEOUT_MS = 0 表示永不超时，持续监听。 */
-#define SLAVE_RX_TIMEOUT_MS   0
+#define SLAVE_RX_TIMEOUT_MS   0u
 
 /*============================ MACROFIED FUNCTIONS ===========================*/
 
@@ -99,14 +99,17 @@ void slave_init(void)
         .user_data   = NULL,
         .trace       = NULL,
     };
-    ping_pong_config_t config = {
-        .max_retries   = 0,
-        .rx_timeout_ms = SLAVE_RX_TIMEOUT_MS,
-        .tx_timeout_ms = 0,
-    };
+    ping_pong_config_t config;
 
     ping_pong_init(g_slave, &port);
+
+    /* 从编译期默认配置出发，只覆盖从机持续监听需要的字段。 */
+    ping_pong_get_default_config(&config);
+    config.max_retries   = 0;
+    config.rx_timeout_ms = SLAVE_RX_TIMEOUT_MS;
+    config.tx_timeout_ms = 0;
     ping_pong_set_config(g_slave, &config);
+
     ping_pong_start(g_slave, PING_PONG_ROLE_SLAVE);
 }
 
