@@ -9,32 +9,13 @@
  *  5. 无线接收完成后（中断或回调）调用 master_on_radio_rx_done()
  */
 
-/*============================ INCLUDES ======================================*/
-
 #include "ping_pong.h"
 
-/*============================ MACROS ========================================*/
-
-#define MASTER_TIMEOUT_MS      3000u
-#define MASTER_MAX_RETRIES        3u
-
-/*============================ MACROFIED FUNCTIONS ===========================*/
+#define MASTER_TIMEOUT_MS          3000u
+#define MASTER_MAX_RETRIES            3u
+#define MASTER_RESTART_DELAY_MS    1000u
 
 PING_PONG_DEFINE_INSTANCE(g_master);
-
-/*============================ TYPES =========================================*/
-
-/* None. */
-
-/*============================ GLOBAL VARIABLES ==============================*/
-
-/* None. */
-
-/*============================ LOCAL VARIABLES ===============================*/
-
-static volatile int g_restart_pending;
-
-/*============================ PROTOTYPES ====================================*/
 
 static uint32_t platform_get_time_ms(void);
 static void radio_start_tx(const uint8_t *data, uint32_t len);
@@ -46,8 +27,6 @@ void master_process(void);
 void master_on_radio_tx_done(void);
 void master_on_radio_rx_done(const uint8_t *data, uint32_t len,
                              int16_t rssi, int16_t snr);
-
-/*============================ IMPLEMENTATION ================================*/
 
 static uint32_t platform_get_time_ms(void)
 {
@@ -72,7 +51,6 @@ static void radio_start_rx(void)
 static void master_notify(ping_pong_t *pp, const ping_pong_notify_t *n,
                           void *user_data)
 {
-    (void)pp;
     (void)user_data;
 
     switch (n->type) {
@@ -87,9 +65,19 @@ static void master_notify(ping_pong_t *pp, const ping_pong_notify_t *n,
         break;
 
     case PING_PONG_NOTIFY_SUCCESS:
-    case PING_PONG_NOTIFY_FAIL:
-        g_restart_pending = 1;
+        /* 一轮成功。auto_restart 已在核心内 pending，回调中不需要重启。 */
         break;
+
+    case PING_PONG_NOTIFY_FAIL: {
+        ping_pong_stats_t stats;
+        if (ping_pong_get_stats(pp, &stats) == PING_PONG_OK) {
+            /* 推荐上层恢复策略：连续失败达到阈值后 reset 协议实例或 radio。 */
+            if (stats.consecutive_fail_count >= 3u) {
+                /* TODO: reset radio 或上报设备健康状态。 */
+            }
+        }
+        break;
+    }
 
     default:
         break;
@@ -110,9 +98,11 @@ void master_init(void)
 
     /* 从编译期默认配置出发，只覆盖当前示例需要调整的字段。 */
     ping_pong_get_default_config(&config);
-    config.max_retries   = MASTER_MAX_RETRIES;
-    config.rx_timeout_ms = MASTER_TIMEOUT_MS;
-    config.tx_timeout_ms = 0;
+    config.max_retries      = MASTER_MAX_RETRIES;
+    config.rx_timeout_ms    = MASTER_TIMEOUT_MS;
+    config.tx_timeout_ms    = 0;
+    config.auto_restart     = 1u;
+    config.restart_delay_ms = MASTER_RESTART_DELAY_MS;
     ping_pong_set_config(g_master, &config);
 
     ping_pong_start(g_master, PING_PONG_ROLE_MASTER);
@@ -120,12 +110,8 @@ void master_init(void)
 
 void master_process(void)
 {
+    /* auto_restart 模式下，SUCCESS / FAIL 后由核心在 process() 中启动下一轮。 */
     ping_pong_process(g_master);
-
-    if (g_restart_pending) {
-        g_restart_pending = 0;
-        ping_pong_start(g_master, PING_PONG_ROLE_MASTER);
-    }
 }
 
 void master_on_radio_tx_done(void)

@@ -223,7 +223,13 @@ static void test_state_lifecycle_errors(void)
 
     assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
     assert(g_seen_user_data == &g_user_data_value);
-    assert(ping_pong_set_config(pp, &(ping_pong_config_t){1, 100, 0}) == PING_PONG_ERR_INVALID_STATE);
+    assert(ping_pong_set_config(pp, &(ping_pong_config_t){
+        .max_retries = 1,
+        .rx_timeout_ms = 100,
+        .tx_timeout_ms = 0,
+        .auto_restart = 0,
+        .restart_delay_ms = 0,
+    }) == PING_PONG_ERR_INVALID_STATE);
     assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_ERR_INVALID_STATE);
     assert(ping_pong_on_rx_done(pp, packet, sizeof(packet), 0, 0) == PING_PONG_ERR_INVALID_STATE);
     assert(ping_pong_stop(pp) == PING_PONG_OK);
