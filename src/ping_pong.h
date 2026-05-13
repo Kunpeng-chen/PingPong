@@ -31,8 +31,13 @@ extern "C" {
 #define PING_PONG_FAIL_REASON_TX_TIMEOUT   5
 #define PING_PONG_FAIL_REASON_CONFLICT     6
 
-#define PING_PONG_MIN_PACKET_SIZE  6
-#define PING_PONG_PACKET_SIZE      PING_PONG_MIN_PACKET_SIZE
+#define PING_PONG_PROTOCOL_VERSION_V1 1u
+#define PING_PONG_PROTOCOL_VERSION_V2 2u
+
+#define PING_PONG_V1_PACKET_SIZE      6u
+#define PING_PONG_V2_PACKET_SIZE      24u
+#define PING_PONG_MIN_PACKET_SIZE     PING_PONG_V1_PACKET_SIZE
+#define PING_PONG_PACKET_SIZE         PING_PONG_V2_PACKET_SIZE
 
 #ifndef PING_PONG_MAX_TIMEOUT_MS
 #define PING_PONG_MAX_TIMEOUT_MS   600000
@@ -42,7 +47,7 @@ extern "C" {
 #endif
 
 #ifndef PING_PONG_TX_BUFFER_SIZE
-#define PING_PONG_TX_BUFFER_SIZE   PING_PONG_MIN_PACKET_SIZE
+#define PING_PONG_TX_BUFFER_SIZE   PING_PONG_PACKET_SIZE
 #endif
 
 /**
@@ -94,6 +99,9 @@ typedef struct {
     uint32_t tx_timeout_ms;    /**< TX timeout protection. Set 0 to disable. */
     uint8_t  auto_restart;     /**< MASTER automatically starts next round after SUCCESS/FAIL when non-zero. */
     uint32_t restart_delay_ms; /**< Delay before auto-restarting the next MASTER round. */
+    uint32_t network_id;       /**< Logical network identifier for v2 packet filtering. */
+    uint16_t src_id;           /**< Local device address used as v2 packet source. */
+    uint16_t dst_id;           /**< Expected peer device address used as v2 packet destination. */
 } ping_pong_config_t;
 
 /** @brief Raw protocol statistics. */
@@ -164,6 +172,12 @@ ping_pong_err_t ping_pong_get_stats(const ping_pong_t *pp, ping_pong_stats_t *st
 int ping_pong_is_valid(const ping_pong_t *pp);
 ping_pong_err_t ping_pong_build_ping(uint8_t *buf, uint32_t buf_size, uint16_t seq);
 ping_pong_err_t ping_pong_build_pong(uint8_t *buf, uint32_t buf_size, uint16_t seq);
+ping_pong_err_t ping_pong_build_ping_ex(uint8_t *buf, uint32_t buf_size, uint16_t seq,
+                                         uint32_t network_id, uint16_t src_id,
+                                         uint16_t dst_id);
+ping_pong_err_t ping_pong_build_pong_ex(uint8_t *buf, uint32_t buf_size, uint16_t seq,
+                                         uint32_t network_id, uint16_t src_id,
+                                         uint16_t dst_id);
 
 #ifdef __cplusplus
 }
