@@ -67,6 +67,11 @@ static void test_get_default_config_values(void)
     assert(config.max_retries == PING_PONG_DEFAULT_MAX_RETRIES);
     assert(config.rx_timeout_ms == PING_PONG_DEFAULT_RX_TIMEOUT_MS);
     assert(config.tx_timeout_ms == PING_PONG_DEFAULT_TX_TIMEOUT_MS);
+    assert(config.auto_restart == PING_PONG_DEFAULT_AUTO_RESTART);
+    assert(config.restart_delay_ms == PING_PONG_DEFAULT_RESTART_DELAY_MS);
+    assert(config.network_id == PING_PONG_DEFAULT_NETWORK_ID);
+    assert(config.src_id == PING_PONG_DEFAULT_SRC_ID);
+    assert(config.dst_id == PING_PONG_DEFAULT_DST_ID);
 
     printf("  PASS: test_get_default_config_values\n");
 }
@@ -82,6 +87,7 @@ static void test_init_uses_default_config_without_runtime_override(void)
     assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
     assert(g_notify_count == 1);
     assert(g_notifications[0].type == PING_PONG_NOTIFY_TX_REQUEST);
+    assert(g_notifications[0].payload.tx_request.tx_len == PING_PONG_PACKET_SIZE);
 
     assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
     g_time_ms = PING_PONG_DEFAULT_RX_TIMEOUT_MS;
@@ -107,9 +113,16 @@ static void test_runtime_config_overrides_default_config(void)
     config.max_retries = 1;
     config.rx_timeout_ms = 25;
     config.tx_timeout_ms = 0;
+    config.network_id = 0x10203040u;
+    config.src_id = 0x0001u;
+    config.dst_id = 0x0002u;
     assert(ping_pong_set_config(pp, &config) == PING_PONG_OK);
 
     assert(ping_pong_start(pp, PING_PONG_ROLE_MASTER) == PING_PONG_OK);
+    assert(g_notifications[0].payload.tx_request.tx_buffer[4] == 0x10u);
+    assert(g_notifications[0].payload.tx_request.tx_buffer[8] == 0x00u);
+    assert(g_notifications[0].payload.tx_request.tx_buffer[9] == 0x01u);
+    assert(g_notifications[0].payload.tx_request.tx_buffer[11] == 0x02u);
     assert(ping_pong_on_tx_done(pp) == PING_PONG_OK);
 
     g_time_ms = 24;
@@ -142,10 +155,16 @@ static void test_local_modify_from_default_config(void)
 
     ping_pong_get_default_config(&config);
     config.tx_timeout_ms = 0;
+    config.network_id = 7u;
+    config.src_id = 1u;
+    config.dst_id = 2u;
 
     assert(config.max_retries == PING_PONG_DEFAULT_MAX_RETRIES);
     assert(config.rx_timeout_ms == PING_PONG_DEFAULT_RX_TIMEOUT_MS);
     assert(config.tx_timeout_ms == 0);
+    assert(config.network_id == 7u);
+    assert(config.src_id == 1u);
+    assert(config.dst_id == 2u);
 
     printf("  PASS: test_local_modify_from_default_config\n");
 }
