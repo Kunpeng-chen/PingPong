@@ -16,7 +16,7 @@
 - Phase 1：恢复测试体系与 CI 稳定性 [√]
 - Phase 2：增强 Master 对坏包的容错 [√]
 - Phase 3：编译期默认配置与运行时覆盖 [√]
-- Phase 4：Master 自动连续运行与失败恢复策略 [ ]
+- Phase 4：Master 自动连续运行与失败恢复策略 [√]
 - Phase 5：引入设备地址和网络 ID [ ]
 - Phase 6：认证与防重放 [ ]
 - Phase 7：硬件压力测试与现场试点 [ ]
@@ -27,7 +27,7 @@
 2. `[√]` `release: tag v0.1.0 baseline after test restoration`
 3. `[√]` `feat: make master tolerate corrupted/unrelated packets until timeout`
 4. `[√]` `feat: add compile-time default config header`
-5. `[ ]` `feat: add master auto-restart mode`
+5. `[√]` `feat: add master auto-restart mode`
 6. `[ ]` `feat: add identity fields and versioned v2 packet format`
 7. `[ ]` `feat: add SipHash-2-4 authentication and replay protection`
 
@@ -74,6 +74,14 @@ Phase 3 已验证该流程：
 - CI：`CI` run #63，`success`
 - 合并方式：squash merge
 - merge commit：`03a142f3d3903f3b98205a98a247981a66ed47c9`
+
+Phase 4 已验证该流程：
+
+- 干净实现分支：`feat/phase4-master-auto-restart`
+- 成功 PR：#13
+- CI：`CI` run #66，`success`
+- 合并方式：squash merge
+- merge commit：`9e9a0c6437e2b39789dce58f372c454c172850a9`
 
 ## 新增配置计划说明
 
