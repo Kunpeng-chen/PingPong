@@ -290,6 +290,16 @@ static void send_tx_request(ping_pong_t *pp)
     send_notify(pp, &tx_notify);
 }
 
+void ping_pong_get_default_config(ping_pong_config_t *config)
+{
+    if (!config) {
+        return;
+    }
+    config->max_retries   = PING_PONG_DEFAULT_MAX_RETRIES;
+    config->rx_timeout_ms = PING_PONG_DEFAULT_RX_TIMEOUT_MS;
+    config->tx_timeout_ms = PING_PONG_DEFAULT_TX_TIMEOUT_MS;
+}
+
 ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port)
 {
     if (!pp || !port || !port->get_time_ms || !port->notify) {
@@ -300,9 +310,7 @@ ping_pong_err_t ping_pong_init(ping_pong_t *pp, const ping_pong_port_t *port)
     pp->state = PING_PONG_STATE_IDLE;
     pp->role = PING_PONG_ROLE_NONE;
     pp->port = *port;
-    pp->config.max_retries   = PING_PONG_DEFAULT_MAX_RETRIES;
-    pp->config.rx_timeout_ms = PING_PONG_DEFAULT_RX_TIMEOUT_MS;
-    pp->config.tx_timeout_ms = PING_PONG_DEFAULT_TX_TIMEOUT_MS;
+    ping_pong_get_default_config(&pp->config);
     PP_TRACE(pp, "init: ok");
     return PING_PONG_OK;
 }

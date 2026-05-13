@@ -15,8 +15,8 @@
 
 /*============================ MACROS ========================================*/
 
-#define MASTER_TIMEOUT_MS      3000
-#define MASTER_MAX_RETRIES        3
+#define MASTER_TIMEOUT_MS      3000u
+#define MASTER_MAX_RETRIES        3u
 
 /*============================ MACROFIED FUNCTIONS ===========================*/
 
@@ -104,14 +104,17 @@ void master_init(void)
         .user_data   = NULL,
         .trace       = NULL,
     };
-    ping_pong_config_t config = {
-        .max_retries   = MASTER_MAX_RETRIES,
-        .rx_timeout_ms = MASTER_TIMEOUT_MS,
-        .tx_timeout_ms = 0,
-    };
+    ping_pong_config_t config;
 
     ping_pong_init(g_master, &port);
+
+    /* 从编译期默认配置出发，只覆盖当前示例需要调整的字段。 */
+    ping_pong_get_default_config(&config);
+    config.max_retries   = MASTER_MAX_RETRIES;
+    config.rx_timeout_ms = MASTER_TIMEOUT_MS;
+    config.tx_timeout_ms = 0;
     ping_pong_set_config(g_master, &config);
+
     ping_pong_start(g_master, PING_PONG_ROLE_MASTER);
 }
 

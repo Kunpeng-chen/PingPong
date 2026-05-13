@@ -8,6 +8,10 @@ target_link_libraries(test_ping_pong_extensions PRIVATE pingpong)
 add_executable(test_master_bad_packet_tolerance test_master_bad_packet_tolerance.c)
 target_link_libraries(test_master_bad_packet_tolerance PRIVATE pingpong)
 
+add_executable(test_default_config test_default_config.c)
+target_link_libraries(test_default_config PRIVATE pingpong)
+
 add_test(NAME test_ping_pong COMMAND test_ping_pong)
 add_test(NAME test_ping_pong_extensions COMMAND test_ping_pong_extensions)
 add_test(NAME test_master_bad_packet_tolerance COMMAND test_master_bad_packet_tolerance)
+add_test(NAME test_default_config COMMAND test_default_config)

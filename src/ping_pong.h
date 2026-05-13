@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "ping_pong_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,16 +43,6 @@ extern "C" {
 
 #ifndef PING_PONG_TX_BUFFER_SIZE
 #define PING_PONG_TX_BUFFER_SIZE   PING_PONG_MIN_PACKET_SIZE
-#endif
-
-#ifndef PING_PONG_DEFAULT_MAX_RETRIES
-#define PING_PONG_DEFAULT_MAX_RETRIES    3
-#endif
-#ifndef PING_PONG_DEFAULT_RX_TIMEOUT_MS
-#define PING_PONG_DEFAULT_RX_TIMEOUT_MS  3000
-#endif
-#ifndef PING_PONG_DEFAULT_TX_TIMEOUT_MS
-#define PING_PONG_DEFAULT_TX_TIMEOUT_MS  3000
 #endif
 
 /**
@@ -184,6 +175,12 @@ typedef struct {
  * calling ping_pong_init(). The size includes the opaque context and internal TX buffer.
  */
 uint32_t ping_pong_instance_size(void);
+
+/**
+ * @brief Copy the compile-time default configuration values.
+ * @param config Output configuration structure. NULL is ignored.
+ */
+void ping_pong_get_default_config(ping_pong_config_t *config);
 
 /**
  * @brief Initialize a PingPong instance and load default configuration values.
