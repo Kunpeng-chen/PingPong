@@ -30,4 +30,16 @@
 #define PING_PONG_DEFAULT_RESTART_DELAY_MS  0u
 #endif
 
+#ifndef PING_PONG_DEFAULT_NETWORK_ID
+#define PING_PONG_DEFAULT_NETWORK_ID        0u
+#endif
+
+#ifndef PING_PONG_DEFAULT_SRC_ID
+#define PING_PONG_DEFAULT_SRC_ID            0u
+#endif
+
+#ifndef PING_PONG_DEFAULT_DST_ID
+#define PING_PONG_DEFAULT_DST_ID            0u
+#endif
+
 #endif /* PING_PONG_CONFIG_H */
