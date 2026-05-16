@@ -51,7 +51,42 @@
 - 无遗留冲突 PR
 - 相关计划状态已同步更新
 
-## 4. 标准执行流程
+## 4. 计划文档命名规则
+
+具体计划文档必须放在 `docs/plan/` 下。
+
+命名格式：
+
+```text
+<scope>-<topic>-plan.md
+```
+
+命名要求：
+
+- 使用小写英文
+- 单词之间使用短横线 `-`
+- 文件名必须以 `-plan.md` 结尾
+- 文件名应体现计划范围和主题
+- 不使用空格、中文、下划线或日期前缀
+
+示例：
+
+```text
+docs/plan/production-readiness-plan.md
+docs/plan/runtime-state-dispatch-plan.md
+docs/plan/protocol-v2-identity-plan.md
+docs/plan/security-replay-protection-plan.md
+```
+
+如果计划是某个 Phase 的实现计划，可以使用：
+
+```text
+docs/plan/phase5-identity-v2-packet-plan.md
+```
+
+如果计划是跨 Phase 的专题计划，使用专题名，不强制带 Phase 编号。
+
+## 5. 标准执行流程
 
 ### Step 1：明确当前阶段最小交付范围
 
@@ -176,7 +211,7 @@ CI 通过且 PR 可合并后，使用 squash merge 合并到 `main`。
 
 满足完成条件后，才允许将对应计划项从 `[ ]` 更新为 `[√]`。
 
-## 5. Tag 规则
+## 6. Tag 规则
 
 Alpha tag 只能在对应 Phase 的实现 PR 已合并到 `main` 后创建。
 
@@ -187,7 +222,7 @@ Alpha tag 只能在对应 Phase 的实现 PR 已合并到 `main` 后创建。
 
 具体 tag 规划应记录在 `docs/plan/` 下的计划文档中。
 
-## 6. 禁止事项汇总
+## 7. 禁止事项汇总
 
 - 禁止一个 PR 同时实现多个 Phase
 - 禁止 CI 未通过就合并
@@ -196,8 +231,9 @@ Alpha tag 只能在对应 Phase 的实现 PR 已合并到 `main` 后创建。
 - 禁止把计划状态提前标记为完成
 - 禁止合并到 `main` 后跳过 README 检查
 - 禁止把计划文档大更新混入功能实现 PR
+- 禁止把具体计划内容写入 `docs/rule/` 下的通用规则文档
 
-## 7. 面向新增任务的模板
+## 8. 面向新增任务的模板
 
 新增任务建议使用以下格式，并放入 `docs/plan/` 下的具体计划文档中：
 
