@@ -33,6 +33,7 @@ Rule documents define:
 
 - plan document naming
 - phase splitting requirements
+- plan priority evaluation rules
 - status markers `[ ]` and `[√]`
 - branch, PR, CI, and squash merge requirements
 - README check requirements
@@ -64,21 +65,14 @@ docs/plan/runtime-state-dispatch-plan.md
 
 Plans should be split into multiple independently verifiable phases according to complexity. A plan should not default to a single broad Phase.
 
-## 4. Current Important Plan
+Agents must not hardcode a single “current important plan” in this file. When choosing what to work on, agents should inspect `docs/plan/` and apply the priority rules from `docs/rule/production-readiness-rules.md`.
 
-For the runtime state dispatch refactor, read:
-
-```text
-docs/plan/runtime-state-dispatch-plan.md
-```
-
-This plan currently governs the work to unify runtime state transitions around `pp_dispatch()` while keeping the project lightweight.
-
-## 5. Agent Behavior Requirements
+## 4. Agent Behavior Requirements
 
 Agents must:
 
 - read the rule document before drafting or modifying plans
+- inspect relevant plans under `docs/plan/` before selecting or executing work
 - place concrete plans under `docs/plan/`
 - keep generic process rules under `docs/rule/`
 - split complex plans into independently verifiable phases
@@ -92,11 +86,12 @@ Agents must not:
 - invent a new workflow without checking `docs/rule/`
 - put concrete implementation plans in `docs/rule/`
 - put generic workflow rules in `docs/plan/`
+- hardcode a current priority plan in `AGENTS.md`
 - mark `[√]` before PR merge, CI success, tests, README check, and status update
 - mix multiple phases into one implementation PR
 - change public API or protocol format unless the relevant plan explicitly allows it
 
-## 6. When Rules and Plans Conflict
+## 5. When Rules and Plans Conflict
 
 If a task conflicts with existing rules or plans:
 
@@ -106,7 +101,7 @@ If a task conflicts with existing rules or plans:
 
 Rules are authoritative for process. Plans are authoritative for the concrete work scope.
 
-## 7. Repository-Specific Notes
+## 6. Repository-Specific Notes
 
 PingPong is intended to remain a lightweight communication protocol module.
 
