@@ -14,8 +14,12 @@ target_link_libraries(test_default_config PRIVATE pingpong)
 add_executable(test_master_auto_restart test_master_auto_restart.c)
 target_link_libraries(test_master_auto_restart PRIVATE pingpong)
 
+add_executable(test_runtime_state_transitions test_runtime_state_transitions.c)
+target_link_libraries(test_runtime_state_transitions PRIVATE pingpong)
+
 add_test(NAME test_ping_pong COMMAND test_ping_pong)
 add_test(NAME test_ping_pong_extensions COMMAND test_ping_pong_extensions)
 add_test(NAME test_master_bad_packet_tolerance COMMAND test_master_bad_packet_tolerance)
 add_test(NAME test_default_config COMMAND test_default_config)
 add_test(NAME test_master_auto_restart COMMAND test_master_auto_restart)
+add_test(NAME test_runtime_state_transitions COMMAND test_runtime_state_transitions)
