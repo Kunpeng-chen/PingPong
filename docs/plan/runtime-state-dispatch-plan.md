@@ -87,7 +87,7 @@ README 影响：
 - CI：run #80，`success`
 - merge commit：`60bedb788d7c33ae9fe3a2abb5ea89bb5381c0d3`
 
-## Phase 2：引入 pp_dispatch 并迁移简单运行期入口 [ ]
+## Phase 2：引入 pp_dispatch 并迁移简单运行期入口 [√]
 
 目标：
 
@@ -154,11 +154,13 @@ refactor: route simple runtime events through dispatch
 
 README 影响：
 
-预计无用户可见变化。合并后应记录：
+无用户可见变化，已检查 README，无需更新。
 
-```text
-已检查 README，无需更新。
-```
+执行记录：
+
+- PR：#16 `refactor: route simple runtime events through dispatch`
+- CI：run #83，`success`
+- merge commit：`94b356ea80679240ab686994d881259cc980ff49`
 
 ## Phase 3：迁移 process 超时与自动重启调度 [ ]
 
