@@ -35,6 +35,14 @@ typedef enum {
     EVT_COUNT
 } pp_event_t;
 
+typedef struct {
+    uint32_t now_ms;
+    const uint8_t *rx_data;
+    uint32_t rx_len;
+    int16_t rssi;
+    int16_t snr;
+} pp_event_data_t;
+
 struct ping_pong {
     uint32_t magic;
     ping_pong_state_t state;
@@ -53,6 +61,8 @@ struct ping_pong {
 static void send_tx_request(ping_pong_t *pp);
 static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
 static void handle_master_retry(ping_pong_t *pp);
+static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
+                                   const pp_event_data_t *data);
 
 static const uint8_t valid_transitions[4][EVT_COUNT] = {
     [PING_PONG_STATE_IDLE] = {
@@ -284,6 +294,57 @@ static void send_tx_request(ping_pong_t *pp)
     send_notify(pp, &tx_notify);
 }
 
+static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
+                                   const pp_event_data_t *data)
+{
+    uint32_t now_ms;
+    ping_pong_role_t previous_role;
+
+    if (!is_valid_transition(pp->state, event)) {
+        return PING_PONG_ERR_INVALID_STATE;
+    }
+
+    now_ms = data ? data->now_ms : pp->port.get_time_ms();
+
+    switch (event) {
+    case EVT_START_MASTER:
+        pp->auto_restart_pending = 0u;
+        pp->next_start_time = 0u;
+        previous_role = pp->role;
+        if (previous_role == PING_PONG_ROLE_MASTER) {
+            pp->current_seq++;
+        }
+        pp->role = PING_PONG_ROLE_MASTER;
+        pp->current_retry = 0;
+        pp->state = PING_PONG_STATE_TX;
+        pp->tx_start_time = now_ms;
+        send_tx_request(pp);
+        return PING_PONG_OK;
+
+    case EVT_START_SLAVE:
+        pp->auto_restart_pending = 0u;
+        pp->next_start_time = 0u;
+        pp->role = PING_PONG_ROLE_SLAVE;
+        pp->current_retry = 0;
+        enter_rx_wait(pp, now_ms);
+        return PING_PONG_OK;
+
+    case EVT_STOP:
+        pp->auto_restart_pending = 0u;
+        pp->next_start_time = 0u;
+        pp->state = PING_PONG_STATE_STOPPED;
+        return PING_PONG_OK;
+
+    case EVT_TX_DONE:
+        enter_rx_wait(pp, now_ms);
+        return PING_PONG_OK;
+
+    case EVT_RX_DONE:
+    default:
+        return PING_PONG_ERR_INVALID_STATE;
+    }
+}
+
 void ping_pong_get_default_config(ping_pong_config_t *config)
 {
     if (!config) {
@@ -328,7 +389,9 @@ ping_pong_err_t ping_pong_set_config(ping_pong_t *pp, const ping_pong_config_t *
 
 ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
 {
-    ping_pong_role_t previous_role;
+    pp_event_t evt;
+    pp_event_data_t data;
+
     if (!pp) { return PING_PONG_ERR_NULL_PTR; }
     if (pp->magic != PING_PONG_MAGIC) { return PING_PONG_ERR_NOT_INITIALIZED; }
     if (role != PING_PONG_ROLE_MASTER && role != PING_PONG_ROLE_SLAVE) {
@@ -342,35 +405,23 @@ ping_pong_err_t ping_pong_start(ping_pong_t *pp, ping_pong_role_t role)
             return PING_PONG_ERR_INVALID_PARAM;
         }
     }
-    pp_event_t evt = (role == PING_PONG_ROLE_MASTER) ? EVT_START_MASTER : EVT_START_SLAVE;
-    if (!is_valid_transition(pp->state, evt)) { return PING_PONG_ERR_INVALID_STATE; }
-    pp->auto_restart_pending = 0u;
-    pp->next_start_time = 0u;
-    previous_role = pp->role;
-    if (role == PING_PONG_ROLE_MASTER && previous_role == PING_PONG_ROLE_MASTER) {
-        pp->current_seq++;
-    }
-    pp->role = role;
-    pp->current_retry = 0;
-    if (role == PING_PONG_ROLE_MASTER) {
-        pp->state = PING_PONG_STATE_TX;
-        pp->tx_start_time = pp->port.get_time_ms();
-        send_tx_request(pp);
-    } else {
-        enter_rx_wait(pp, pp->port.get_time_ms());
-    }
-    return PING_PONG_OK;
+
+    evt = (role == PING_PONG_ROLE_MASTER) ? EVT_START_MASTER : EVT_START_SLAVE;
+    pp_memset(&data, 0, sizeof(data));
+    data.now_ms = pp->port.get_time_ms();
+    return pp_dispatch(pp, evt, &data);
 }
 
 ping_pong_err_t ping_pong_stop(ping_pong_t *pp)
 {
+    pp_event_data_t data;
+
     if (!pp) { return PING_PONG_ERR_NULL_PTR; }
     if (pp->magic != PING_PONG_MAGIC) { return PING_PONG_ERR_NOT_INITIALIZED; }
-    if (!is_valid_transition(pp->state, EVT_STOP)) { return PING_PONG_ERR_INVALID_STATE; }
-    pp->auto_restart_pending = 0u;
-    pp->next_start_time = 0u;
-    pp->state = PING_PONG_STATE_STOPPED;
-    return PING_PONG_OK;
+
+    pp_memset(&data, 0, sizeof(data));
+    data.now_ms = pp->port.get_time_ms();
+    return pp_dispatch(pp, EVT_STOP, &data);
 }
 
 ping_pong_err_t ping_pong_reset(ping_pong_t *pp)
@@ -444,11 +495,14 @@ ping_pong_err_t ping_pong_process(ping_pong_t *pp)
 
 ping_pong_err_t ping_pong_on_tx_done(ping_pong_t *pp)
 {
+    pp_event_data_t data;
+
     if (!pp) { return PING_PONG_ERR_NULL_PTR; }
     if (pp->magic != PING_PONG_MAGIC) { return PING_PONG_ERR_NOT_INITIALIZED; }
-    if (!is_valid_transition(pp->state, EVT_TX_DONE)) { return PING_PONG_ERR_INVALID_STATE; }
-    enter_rx_wait(pp, pp->port.get_time_ms());
-    return PING_PONG_OK;
+
+    pp_memset(&data, 0, sizeof(data));
+    data.now_ms = pp->port.get_time_ms();
+    return pp_dispatch(pp, EVT_TX_DONE, &data);
 }
 
 ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len,
