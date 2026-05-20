@@ -304,6 +304,10 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
 {
     uint32_t now_ms;
     ping_pong_role_t previous_role;
+    const uint8_t *rx_data;
+    uint32_t rx_len;
+    const ping_pong_header_t *header;
+    uint16_t seq;
 
     if (!is_valid_transition(pp->state, event)) {
         return PING_PONG_ERR_INVALID_STATE;
@@ -342,6 +346,57 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
 
     case EVT_TX_DONE:
         enter_rx_wait(pp, now_ms);
+        return PING_PONG_OK;
+
+    case EVT_RX_DONE:
+        if (!data || !data->rx_data) {
+            return PING_PONG_ERR_NULL_PTR;
+        }
+        rx_data = data->rx_data;
+        rx_len = data->rx_len;
+        header = (const ping_pong_header_t *)rx_data;
+        seq = get_u16_be(&header->seq_hi);
+
+        if (pp->role == PING_PONG_ROLE_MASTER) {
+            if (header->type == PACKET_TYPE_PONG) {
+                int rc = parse_packet(pp, rx_data, rx_len, PACKET_TYPE_PONG);
+                if (rc == PARSE_OK) {
+                    uint32_t rtt_ms = now_ms - pp->tx_start_time;
+                    pp->stats.rx_count++;
+                    handle_master_success(pp, rtt_ms, data->rssi, data->snr);
+                } else if (rc == PARSE_ERR_CRC) {
+                    pp->stats.crc_error_count++;
+                    PP_TRACE(pp, "master: ignore crc error");
+                } else {
+                    pp->stats.parse_error_count++;
+                    PP_TRACE(pp, "master: ignore parse error");
+                }
+            } else if (header->type == PACKET_TYPE_PING) {
+                pp->stats.conflict_count++;
+                PP_TRACE(pp, "master: ignore ping conflict");
+            } else {
+                pp->stats.parse_error_count++;
+                PP_TRACE(pp, "master: ignore unknown packet type");
+            }
+        } else if (pp->role == PING_PONG_ROLE_SLAVE) {
+            if (header->type == PACKET_TYPE_PING) {
+                uint32_t header_len = rx_len - PING_PONG_CRC_SIZE;
+                uint16_t computed = compute_crc16(rx_data, header_len);
+                uint16_t received = get_u16_be(&rx_data[header_len]);
+                if (computed != received) {
+                    pp->stats.crc_error_count++;
+                    enter_rx_wait(pp, now_ms);
+                } else {
+                    handle_slave_ping_received(pp, seq, data->rssi, data->snr);
+                }
+            } else if (header->type == PACKET_TYPE_PONG) {
+                pp->stats.conflict_count++;
+                enter_rx_wait(pp, now_ms);
+            } else {
+                pp->stats.parse_error_count++;
+                enter_rx_wait(pp, now_ms);
+            }
+        }
         return PING_PONG_OK;
 
     case EVT_TICK:
@@ -397,7 +452,6 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
         }
         return PING_PONG_OK;
 
-    case EVT_RX_DONE:
     default:
         return PING_PONG_ERR_INVALID_STATE;
     }
@@ -525,53 +579,19 @@ ping_pong_err_t ping_pong_on_tx_done(ping_pong_t *pp)
 ping_pong_err_t ping_pong_on_rx_done(ping_pong_t *pp, const uint8_t *data, uint32_t len,
                                       int16_t rssi, int16_t snr)
 {
+    pp_event_data_t event_data;
+
     if (!pp || !data) { return PING_PONG_ERR_NULL_PTR; }
     if (pp->magic != PING_PONG_MAGIC) { return PING_PONG_ERR_NOT_INITIALIZED; }
-    if (!is_valid_transition(pp->state, EVT_RX_DONE)) { return PING_PONG_ERR_INVALID_STATE; }
     if (len < PP_MIN_PACKET_SIZE) { return PING_PONG_ERR_INVALID_PARAM; }
-    const ping_pong_header_t *header = (const ping_pong_header_t *)data;
-    uint16_t seq = get_u16_be(&header->seq_hi);
-    if (pp->role == PING_PONG_ROLE_MASTER) {
-        if (header->type == PACKET_TYPE_PONG) {
-            int rc = parse_packet(pp, data, len, PACKET_TYPE_PONG);
-            if (rc == PARSE_OK) {
-                uint32_t rtt_ms = pp->port.get_time_ms() - pp->tx_start_time;
-                pp->stats.rx_count++;
-                handle_master_success(pp, rtt_ms, rssi, snr);
-            } else if (rc == PARSE_ERR_CRC) {
-                pp->stats.crc_error_count++;
-                PP_TRACE(pp, "master: ignore crc error");
-            } else {
-                pp->stats.parse_error_count++;
-                PP_TRACE(pp, "master: ignore parse error");
-            }
-        } else if (header->type == PACKET_TYPE_PING) {
-            pp->stats.conflict_count++;
-            PP_TRACE(pp, "master: ignore ping conflict");
-        } else {
-            pp->stats.parse_error_count++;
-            PP_TRACE(pp, "master: ignore unknown packet type");
-        }
-    } else if (pp->role == PING_PONG_ROLE_SLAVE) {
-        if (header->type == PACKET_TYPE_PING) {
-            uint32_t header_len = len - PING_PONG_CRC_SIZE;
-            uint16_t computed = compute_crc16(data, header_len);
-            uint16_t received = get_u16_be(&data[header_len]);
-            if (computed != received) {
-                pp->stats.crc_error_count++;
-                enter_rx_wait(pp, pp->port.get_time_ms());
-            } else {
-                handle_slave_ping_received(pp, seq, rssi, snr);
-            }
-        } else if (header->type == PACKET_TYPE_PONG) {
-            pp->stats.conflict_count++;
-            enter_rx_wait(pp, pp->port.get_time_ms());
-        } else {
-            pp->stats.parse_error_count++;
-            enter_rx_wait(pp, pp->port.get_time_ms());
-        }
-    }
-    return PING_PONG_OK;
+
+    pp_memset(&event_data, 0, sizeof(event_data));
+    event_data.now_ms = pp->port.get_time_ms();
+    event_data.rx_data = data;
+    event_data.rx_len = len;
+    event_data.rssi = rssi;
+    event_data.snr = snr;
+    return pp_dispatch(pp, EVT_RX_DONE, &event_data);
 }
 
 ping_pong_state_t ping_pong_get_state(const ping_pong_t *pp)
