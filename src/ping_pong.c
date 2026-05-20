@@ -32,6 +32,7 @@ typedef enum {
     EVT_STOP,
     EVT_TX_DONE,
     EVT_RX_DONE,
+    EVT_TICK,
     EVT_COUNT
 } pp_event_t;
 
@@ -68,18 +69,22 @@ static const uint8_t valid_transitions[4][EVT_COUNT] = {
     [PING_PONG_STATE_IDLE] = {
         [EVT_START_MASTER] = 1, [EVT_START_SLAVE] = 1,
         [EVT_STOP] = 0, [EVT_TX_DONE] = 0, [EVT_RX_DONE] = 0,
+        [EVT_TICK] = 1,
     },
     [PING_PONG_STATE_TX] = {
         [EVT_START_MASTER] = 0, [EVT_START_SLAVE] = 0,
         [EVT_STOP] = 1, [EVT_TX_DONE] = 1, [EVT_RX_DONE] = 0,
+        [EVT_TICK] = 1,
     },
     [PING_PONG_STATE_RX_WAIT] = {
         [EVT_START_MASTER] = 0, [EVT_START_SLAVE] = 0,
         [EVT_STOP] = 1, [EVT_TX_DONE] = 0, [EVT_RX_DONE] = 1,
+        [EVT_TICK] = 1,
     },
     [PING_PONG_STATE_STOPPED] = {
         [EVT_START_MASTER] = 1, [EVT_START_SLAVE] = 1,
         [EVT_STOP] = 0, [EVT_TX_DONE] = 0, [EVT_RX_DONE] = 0,
+        [EVT_TICK] = 1,
     },
 };
 
@@ -339,6 +344,59 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
         enter_rx_wait(pp, now_ms);
         return PING_PONG_OK;
 
+    case EVT_TICK:
+        if (pp->auto_restart_pending && pp->state == PING_PONG_STATE_IDLE &&
+            pp->role == PING_PONG_ROLE_MASTER && pp->config.auto_restart) {
+            if (!time_reached(now_ms, pp->next_start_time)) {
+                return PING_PONG_OK;
+            }
+            return pp_dispatch(pp, EVT_START_MASTER, data);
+        }
+
+        if (pp->state == PING_PONG_STATE_TX) {
+            if (pp->config.tx_timeout_ms > 0 &&
+                (now_ms - pp->tx_start_time) >= pp->config.tx_timeout_ms) {
+                pp->stats.tx_timeout_count++;
+                if (pp->role == PING_PONG_ROLE_MASTER) {
+                    if (pp->current_retry < pp->config.max_retries) {
+                        pp->current_retry++;
+                        handle_master_retry(pp);
+                    } else {
+                        handle_master_fail(pp, PING_PONG_FAIL_REASON_TX_TIMEOUT);
+                    }
+                } else {
+                    PP_TRACE(pp, "slave: tx timeout, back to rx");
+                    enter_rx_wait(pp, now_ms);
+                }
+            }
+            return PING_PONG_OK;
+        }
+
+        if (pp->state != PING_PONG_STATE_RX_WAIT) {
+            return PING_PONG_OK;
+        }
+
+        if (pp->role == PING_PONG_ROLE_MASTER) {
+            if ((now_ms - pp->tx_start_time) >= pp->config.rx_timeout_ms) {
+                if (pp->current_retry < pp->config.max_retries) {
+                    pp->current_retry++;
+                    handle_master_retry(pp);
+                } else {
+                    pp->stats.rx_timeout_count++;
+                    handle_master_fail(pp, PING_PONG_FAIL_REASON_MAX_RETRIES);
+                }
+            }
+        } else if (pp->role == PING_PONG_ROLE_SLAVE) {
+            if (pp->config.rx_timeout_ms == 0) {
+                return PING_PONG_OK;
+            }
+            if ((now_ms - pp->rx_start_time) >= pp->config.rx_timeout_ms) {
+                pp->stats.rx_timeout_count++;
+                enter_rx_wait(pp, now_ms);
+            }
+        }
+        return PING_PONG_OK;
+
     case EVT_RX_DONE:
     default:
         return PING_PONG_ERR_INVALID_STATE;
@@ -442,55 +500,14 @@ ping_pong_err_t ping_pong_reset(ping_pong_t *pp)
 
 ping_pong_err_t ping_pong_process(ping_pong_t *pp)
 {
-    uint32_t now_ms;
+    pp_event_data_t data;
+
     if (!pp) { return PING_PONG_ERR_NULL_PTR; }
     if (pp->magic != PING_PONG_MAGIC) { return PING_PONG_ERR_NOT_INITIALIZED; }
-    now_ms = pp->port.get_time_ms();
 
-    if (pp->auto_restart_pending && pp->state == PING_PONG_STATE_IDLE &&
-        pp->role == PING_PONG_ROLE_MASTER && pp->config.auto_restart) {
-        if (!time_reached(now_ms, pp->next_start_time)) {
-            return PING_PONG_OK;
-        }
-        return ping_pong_start(pp, PING_PONG_ROLE_MASTER);
-    }
-
-    if (pp->state == PING_PONG_STATE_TX) {
-        if (pp->config.tx_timeout_ms > 0 && (now_ms - pp->tx_start_time) >= pp->config.tx_timeout_ms) {
-            pp->stats.tx_timeout_count++;
-            if (pp->role == PING_PONG_ROLE_MASTER) {
-                if (pp->current_retry < pp->config.max_retries) {
-                    pp->current_retry++;
-                    handle_master_retry(pp);
-                } else {
-                    handle_master_fail(pp, PING_PONG_FAIL_REASON_TX_TIMEOUT);
-                }
-            } else {
-                PP_TRACE(pp, "slave: tx timeout, back to rx");
-                enter_rx_wait(pp, now_ms);
-            }
-        }
-        return PING_PONG_OK;
-    }
-    if (pp->state != PING_PONG_STATE_RX_WAIT) { return PING_PONG_OK; }
-    if (pp->role == PING_PONG_ROLE_MASTER) {
-        if ((now_ms - pp->tx_start_time) >= pp->config.rx_timeout_ms) {
-            if (pp->current_retry < pp->config.max_retries) {
-                pp->current_retry++;
-                handle_master_retry(pp);
-            } else {
-                pp->stats.rx_timeout_count++;
-                handle_master_fail(pp, PING_PONG_FAIL_REASON_MAX_RETRIES);
-            }
-        }
-    } else if (pp->role == PING_PONG_ROLE_SLAVE) {
-        if (pp->config.rx_timeout_ms == 0) { return PING_PONG_OK; }
-        if ((now_ms - pp->rx_start_time) >= pp->config.rx_timeout_ms) {
-            pp->stats.rx_timeout_count++;
-            enter_rx_wait(pp, now_ms);
-        }
-    }
-    return PING_PONG_OK;
+    pp_memset(&data, 0, sizeof(data));
+    data.now_ms = pp->port.get_time_ms();
+    return pp_dispatch(pp, EVT_TICK, &data);
 }
 
 ping_pong_err_t ping_pong_on_tx_done(ping_pong_t *pp)
