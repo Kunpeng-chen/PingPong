@@ -287,7 +287,7 @@ README 影响：
 - CI：run #89，`success`
 - merge commit：`1e002afc3f5f9f44fdf888a6b3d613b5c2681e7e`
 
-## Phase 5：清理状态切换残留并更新文档状态 [ ]
+## Phase 5：清理状态切换残留并更新文档状态 [√]
 
 目标：
 
@@ -345,4 +345,10 @@ refactor: clean up runtime state dispatch boundaries
 
 README 影响：
 
-如果只是内部清理，预计无需更新 README；但需要明确记录检查结果。
+无用户可见变化，已检查 README，无需更新。
+
+执行记录：
+
+- PR：#19 `refactor: clean up runtime state dispatch boundaries`
+- CI：run #92，`success`
+- merge commit：`0155ae7bcd085491452cd36bff00fa068835b865`
