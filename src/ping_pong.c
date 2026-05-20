@@ -60,7 +60,7 @@ struct ping_pong {
 };
 
 static void send_tx_request(ping_pong_t *pp);
-static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms);
+static void send_rx_request(ping_pong_t *pp, uint32_t timestamp_ms);
 static void handle_master_retry(ping_pong_t *pp);
 static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
                                    const pp_event_data_t *data);
@@ -201,11 +201,10 @@ static void schedule_master_auto_restart(ping_pong_t *pp, uint32_t now_ms)
 }
 
 static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms,
-                                  int16_t rssi, int16_t snr)
+                                  int16_t rssi, int16_t snr,
+                                  uint32_t now_ms)
 {
-    uint32_t now_ms;
     PP_TRACE(pp, "master: success");
-    now_ms = pp->port.get_time_ms();
     pp->stats.success_count++;
     pp->stats.consecutive_fail_count = 0;
     pp->stats.last_rtt_ms = rtt_ms;
@@ -220,15 +219,13 @@ static void handle_master_success(ping_pong_t *pp, uint32_t rtt_ms,
     notify.payload.success.rssi = rssi;
     notify.payload.success.snr = snr;
     send_notify(pp, &notify);
-    pp->state = PING_PONG_STATE_IDLE;
     schedule_master_auto_restart(pp, now_ms);
 }
 
-static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
+static void handle_master_fail(ping_pong_t *pp, uint32_t reason,
+                               uint32_t now_ms)
 {
-    uint32_t now_ms;
     PP_TRACE(pp, "master: fail");
-    now_ms = pp->port.get_time_ms();
     pp->stats.fail_count++;
     pp->stats.consecutive_fail_count++;
     pp->stats.last_fail_reason = reason;
@@ -240,7 +237,6 @@ static void handle_master_fail(ping_pong_t *pp, uint32_t reason)
     notify.seq = pp->current_seq;
     notify.payload.fail.fail_reason = reason;
     send_notify(pp, &notify);
-    pp->state = PING_PONG_STATE_IDLE;
     schedule_master_auto_restart(pp, now_ms);
 }
 
@@ -248,8 +244,6 @@ static void handle_master_retry(ping_pong_t *pp)
 {
     PP_TRACE(pp, "master: retry");
     pp->stats.retry_count++;
-    pp->state = PING_PONG_STATE_TX;
-    pp->tx_start_time = pp->port.get_time_ms();
     send_tx_request(pp);
 }
 
@@ -261,18 +255,14 @@ static void handle_slave_ping_received(ping_pong_t *pp, uint16_t seq,
     pp->stats.rx_count++;
     pp->stats.last_rssi = rssi;
     pp->stats.last_snr = snr;
-    pp->state = PING_PONG_STATE_TX;
-    pp->tx_start_time = pp->port.get_time_ms();
     send_tx_request(pp);
 }
 
-static void enter_rx_wait(ping_pong_t *pp, uint32_t timestamp_ms)
+static void send_rx_request(ping_pong_t *pp, uint32_t timestamp_ms)
 {
     PP_TRACE(pp, "state: enter RX_WAIT");
     ping_pong_notify_t notify;
     pp_memset(&notify, 0, sizeof(notify));
-    pp->state = PING_PONG_STATE_RX_WAIT;
-    pp->rx_start_time = timestamp_ms;
     notify.type = PING_PONG_NOTIFY_RX_REQUEST;
     notify.timestamp_ms = timestamp_ms;
     notify.seq = pp->current_seq;
@@ -299,6 +289,13 @@ static void send_tx_request(ping_pong_t *pp)
     send_notify(pp, &tx_notify);
 }
 
+/*
+ * Runtime state transition boundary.
+ *
+ * Except for ping_pong_init() and ping_pong_reset(), all runtime writes to
+ * pp->state must stay in this function. Helpers may update statistics,
+ * timestamps, notifications, or packet buffers, but must not change state.
+ */
 static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
                                    const pp_event_data_t *data)
 {
@@ -335,7 +332,9 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
         pp->next_start_time = 0u;
         pp->role = PING_PONG_ROLE_SLAVE;
         pp->current_retry = 0;
-        enter_rx_wait(pp, now_ms);
+        pp->state = PING_PONG_STATE_RX_WAIT;
+        pp->rx_start_time = now_ms;
+        send_rx_request(pp, now_ms);
         return PING_PONG_OK;
 
     case EVT_STOP:
@@ -345,7 +344,9 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
         return PING_PONG_OK;
 
     case EVT_TX_DONE:
-        enter_rx_wait(pp, now_ms);
+        pp->state = PING_PONG_STATE_RX_WAIT;
+        pp->rx_start_time = now_ms;
+        send_rx_request(pp, now_ms);
         return PING_PONG_OK;
 
     case EVT_RX_DONE:
@@ -363,7 +364,8 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
                 if (rc == PARSE_OK) {
                     uint32_t rtt_ms = now_ms - pp->tx_start_time;
                     pp->stats.rx_count++;
-                    handle_master_success(pp, rtt_ms, data->rssi, data->snr);
+                    pp->state = PING_PONG_STATE_IDLE;
+                    handle_master_success(pp, rtt_ms, data->rssi, data->snr, now_ms);
                 } else if (rc == PARSE_ERR_CRC) {
                     pp->stats.crc_error_count++;
                     PP_TRACE(pp, "master: ignore crc error");
@@ -385,16 +387,24 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
                 uint16_t received = get_u16_be(&rx_data[header_len]);
                 if (computed != received) {
                     pp->stats.crc_error_count++;
-                    enter_rx_wait(pp, now_ms);
+                    pp->state = PING_PONG_STATE_RX_WAIT;
+                    pp->rx_start_time = now_ms;
+                    send_rx_request(pp, now_ms);
                 } else {
+                    pp->state = PING_PONG_STATE_TX;
+                    pp->tx_start_time = now_ms;
                     handle_slave_ping_received(pp, seq, data->rssi, data->snr);
                 }
             } else if (header->type == PACKET_TYPE_PONG) {
                 pp->stats.conflict_count++;
-                enter_rx_wait(pp, now_ms);
+                pp->state = PING_PONG_STATE_RX_WAIT;
+                pp->rx_start_time = now_ms;
+                send_rx_request(pp, now_ms);
             } else {
                 pp->stats.parse_error_count++;
-                enter_rx_wait(pp, now_ms);
+                pp->state = PING_PONG_STATE_RX_WAIT;
+                pp->rx_start_time = now_ms;
+                send_rx_request(pp, now_ms);
             }
         }
         return PING_PONG_OK;
@@ -415,13 +425,18 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
                 if (pp->role == PING_PONG_ROLE_MASTER) {
                     if (pp->current_retry < pp->config.max_retries) {
                         pp->current_retry++;
+                        pp->state = PING_PONG_STATE_TX;
+                        pp->tx_start_time = now_ms;
                         handle_master_retry(pp);
                     } else {
-                        handle_master_fail(pp, PING_PONG_FAIL_REASON_TX_TIMEOUT);
+                        pp->state = PING_PONG_STATE_IDLE;
+                        handle_master_fail(pp, PING_PONG_FAIL_REASON_TX_TIMEOUT, now_ms);
                     }
                 } else {
                     PP_TRACE(pp, "slave: tx timeout, back to rx");
-                    enter_rx_wait(pp, now_ms);
+                    pp->state = PING_PONG_STATE_RX_WAIT;
+                    pp->rx_start_time = now_ms;
+                    send_rx_request(pp, now_ms);
                 }
             }
             return PING_PONG_OK;
@@ -435,10 +450,13 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
             if ((now_ms - pp->tx_start_time) >= pp->config.rx_timeout_ms) {
                 if (pp->current_retry < pp->config.max_retries) {
                     pp->current_retry++;
+                    pp->state = PING_PONG_STATE_TX;
+                    pp->tx_start_time = now_ms;
                     handle_master_retry(pp);
                 } else {
                     pp->stats.rx_timeout_count++;
-                    handle_master_fail(pp, PING_PONG_FAIL_REASON_MAX_RETRIES);
+                    pp->state = PING_PONG_STATE_IDLE;
+                    handle_master_fail(pp, PING_PONG_FAIL_REASON_MAX_RETRIES, now_ms);
                 }
             }
         } else if (pp->role == PING_PONG_ROLE_SLAVE) {
@@ -447,7 +465,9 @@ static ping_pong_err_t pp_dispatch(ping_pong_t *pp, pp_event_t event,
             }
             if ((now_ms - pp->rx_start_time) >= pp->config.rx_timeout_ms) {
                 pp->stats.rx_timeout_count++;
-                enter_rx_wait(pp, now_ms);
+                pp->state = PING_PONG_STATE_RX_WAIT;
+                pp->rx_start_time = now_ms;
+                send_rx_request(pp, now_ms);
             }
         }
         return PING_PONG_OK;
