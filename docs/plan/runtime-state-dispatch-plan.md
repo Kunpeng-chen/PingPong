@@ -224,7 +224,7 @@ README 影响：
 - CI：run #86，`success`
 - merge commit：`ec5784050af909ad0fb4d7052425d69e036a348b`
 
-## Phase 4：迁移 rx_done 收包路径 [ ]
+## Phase 4：迁移 rx_done 收包路径 [√]
 
 目标：
 
@@ -279,11 +279,13 @@ refactor: route rx done handling through dispatch
 
 README 影响：
 
-预计无用户可见变化。合并后应记录：
+无用户可见变化，已检查 README，无需更新。
 
-```text
-已检查 README，无需更新。
-```
+执行记录：
+
+- PR：#18 `refactor: route rx done handling through dispatch`
+- CI：run #89，`success`
+- merge commit：`1e002afc3f5f9f44fdf888a6b3d613b5c2681e7e`
 
 ## Phase 5：清理状态切换残留并更新文档状态 [ ]
 
