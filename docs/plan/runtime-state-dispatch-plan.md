@@ -162,7 +162,7 @@ README 影响：
 - CI：run #83，`success`
 - merge commit：`94b356ea80679240ab686994d881259cc980ff49`
 
-## Phase 3：迁移 process 超时与自动重启调度 [ ]
+## Phase 3：迁移 process 超时与自动重启调度 [√]
 
 目标：
 
@@ -216,11 +216,13 @@ refactor: route process timeout handling through dispatch
 
 README 影响：
 
-预计无用户可见变化。合并后应记录：
+无用户可见变化，已检查 README，无需更新。
 
-```text
-已检查 README，无需更新。
-```
+执行记录：
+
+- PR：#17 `refactor: route process timeout handling through dispatch`
+- CI：run #86，`success`
+- merge commit：`ec5784050af909ad0fb4d7052425d69e036a348b`
 
 ## Phase 4：迁移 rx_done 收包路径 [ ]
 
